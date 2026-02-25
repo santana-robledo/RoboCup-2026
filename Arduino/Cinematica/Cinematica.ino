@@ -9,6 +9,11 @@ const float MAX_RAD_A = 130 * 2 * PI / 60; //13.61
 const float MAX_RAD_B = 170 * 2 * PI / 60; //17.80 rad/s
 const float MAX_RAD_C = 170 * 2 * PI / 60; //17.80 rad/s
 
+#define SENSOR_PELOTA 32 //detectamos si tenemos pelota o no
+int estadoPelota = 0;
+int estadoPelotaPrev = -1;
+int patada = 0;
+int patada_prev = 0;
 
 BNO080 myIMU; //Objeto IMU
 #define PIN_INT 2 //Pin de interrupción
@@ -83,6 +88,8 @@ void setup() {
   while(!Serial);
   Serial.setTimeout(20);
 
+  pinMode(SENSOR_PELOTA, INPUT);
+
   pinMode(IN1, OUTPUT); 
   pinMode(IN2, OUTPUT); 
   pinMode(ENA, OUTPUT);
@@ -125,6 +132,12 @@ void setup() {
 }
 
 void loop() {
+  estadoPelota = digitalRead(SENSOR_PELOTA);
+  if (estadoPelota != estadoPelotaPrev) {
+  Serial.print("P,");
+  Serial.println(estadoPelota);
+  estadoPelotaPrev = estadoPelota;
+}
   unsigned long currentTime = micros(); //tiempo actual
   dt = (currentTime - lastTime) / 1000000.0; //Calcula cuánto tiempo pasó desde la última iteración en segundos
   lastTime = currentTime; //Actualiza tiempo
@@ -152,17 +165,28 @@ void loop() {
     char inputBuffer[50];
     input.toCharArray(inputBuffer, 50);
 
-    char *token = strtok(inputBuffer, ",");
+    char *token = strtok(inputBuffer, ","); // M
+    token = strtok(NULL, ","); // Ux
     if(token != NULL) Ux = atof(token);
     token = strtok(NULL, ",");
     if(token != NULL) Uy = atof(token);
     token = strtok(NULL, ",");
     if(token != NULL) Ut = atof(token);
     token = strtok(NULL, ",");
+    if(token != NULL) patada = atoi(token);
+    token = strtok(NULL, ",");
     if(token != NULL) Kp = atof(token);
     token = strtok(NULL, ",");
     if(token != NULL) Ki = atof(token);
   }
+
+  if(patada == 1 && patada_prev == 0){
+  PateadorON(255);
+  delay(120);
+  PateadorOff();
+  }
+  //else{PateadorOff();}
+  patada_prev = patada;
 
   // =================== Cinemática ===================
 
