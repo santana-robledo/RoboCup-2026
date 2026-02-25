@@ -12,12 +12,14 @@ const float MAX_RAD_A = 130 * 2 * PI / 60; //13.61
 const float MAX_RAD_B = 170 * 2 * PI / 60; //17.80 rad/s
 const float MAX_RAD_C = 170 * 2 * PI / 60; //17.80 rad/s
 
-#define SENSOR_PELOTA 32 //detectamos si tenemos pelota o no
+
 int estadoPelota = 0;
 int estadoPelotaPrev = -1;
 int patada = 0;
 int cilindro = 0;
 int patada_prev = 0;
+unsigned long tiempoPatada = 0;
+bool pateando = false;
 
 BNO080 myIMU; //Objeto IMU
 #define PIN_INT 2 //Pin de interrupción
@@ -30,6 +32,7 @@ float theta = 0.0;     // ángulo acumulado en radianes
 float wz = 0.0;        // velocidad angular en rad/s
 float bias = 0.0;      // bias del giroscopio
 float dt = 0.0;        //tiempo
+
 
 unsigned long lastTime = 0;
 
@@ -72,6 +75,8 @@ float theta_deg=0.0; //ángulo actual en grados
 #define IN9 31 // 
 #define IN10 30 // 
 #define ENE 8  //
+
+#define SENSOR_PELOTA 9 //detectamos si tenemos pelota o no
 
 float wa = 0.0, wb = 0.0, wc = 0.0;
 /////// Ganancias PID para orientación /////
@@ -122,8 +127,8 @@ void setup() {
   pinMode(IN9, OUTPUT);
   pinMode(IN10, OUTPUT);
   pinMode(ENE, OUTPUT);
-  
 
+  pinMode(SENSOR_PELOTA, INPUT);
 
   //Inicialización I2C
   Wire.begin();
@@ -190,20 +195,18 @@ void loop() {
     token = strtok(NULL, ",");
     if(token != NULL) Ki = atof(token);
   }
-  /*
-  if(patada == 1 && patada_prev == 0){
+  
+if(patada == 1 && !pateando){
   PateadorON(255);
-  delay(120);
+  tiempoPatada = millis();
+  pateando = true;
+}
+
+if(pateando && millis() - tiempoPatada >= 120){
   PateadorOff();
-  }
-  //else{PateadorOff();}
-  patada_prev = patada;*/
-  if(patada == 1){
-  PateadorON(255);
-  delay(120);
-  PateadorOff();
-  }
-  //else{PateadorOff();}
+  pateando = false;
+  patada = 0;
+}
 
     if(cilindro == 1){
   CilindroON(255);
@@ -258,6 +261,7 @@ void loop() {
   Serial.print(" Pwm_b: "); Serial.print(pwm_b);
   Serial.print(" Pwm_c: "); Serial.print(pwm_c);
   Serial.print(" Cilindro: ");Serial.print(cilindro);
+  Serial.print(" EstadoPelota: ");Serial.print(estadoPelota);
   Serial.print(" Patada: ");Serial.println(patada);
   
 }
