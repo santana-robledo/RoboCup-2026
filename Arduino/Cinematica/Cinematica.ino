@@ -2,8 +2,11 @@
 #include "SparkFun_BNO080_Arduino_Library.h" //Para IMU
 
 /* 
-0.0,0.0,0.0,3.0,0.0
+Forma de enviar los datos
+M,0.0,0.0,0.0,0,0,3.0,0.0
+X    Y   t  P C  Kp  Ki
  */
+ 
  //Constantes de velocidad máxima, RPM a radianes
 const float MAX_RAD_A = 130 * 2 * PI / 60; //13.61 
 const float MAX_RAD_B = 170 * 2 * PI / 60; //17.80 rad/s
@@ -13,6 +16,7 @@ const float MAX_RAD_C = 170 * 2 * PI / 60; //17.80 rad/s
 int estadoPelota = 0;
 int estadoPelotaPrev = -1;
 int patada = 0;
+int cilindro = 0;
 int patada_prev = 0;
 
 BNO080 myIMU; //Objeto IMU
@@ -60,13 +64,13 @@ float theta_deg=0.0; //ángulo actual en grados
 #define ENC 7  // Naranja Derecho
 
 // ===== MOTOR Cilindro =====
-#define IN7 28 // 
-#define IN8 29 // 
-#define END 3  // 
+#define IN7 28 // Negro Izquierd
+#define IN8 29 // Blanco Izquierdo
+#define END 3  // Cafe Izquierdo
 
 // ===== Pateador =====
-#define IN9 30 // 
-#define IN10 31 // 
+#define IN9 31 // 
+#define IN10 30 // 
 #define ENE 8  //
 
 float wa = 0.0, wb = 0.0, wc = 0.0;
@@ -84,6 +88,11 @@ float error_int = 0.0;
 float error_der = 0.0;
 
 void setup() {
+  CilindroOFF();
+  PateadorOff();
+  stopMotorA(); 
+  stopMotorB(); 
+  stopMotorC();
   Serial.begin(115200);
   while(!Serial);
   Serial.setTimeout(20);
@@ -105,16 +114,16 @@ void setup() {
   pinMode(IN7, OUTPUT);
   pinMode(IN8, OUTPUT);
   pinMode(END, OUTPUT);
+  digitalWrite(IN7, LOW);
+  digitalWrite(IN8, LOW);
+  analogWrite(END, 0);
+
 
   pinMode(IN9, OUTPUT);
   pinMode(IN10, OUTPUT);
   pinMode(ENE, OUTPUT);
   
-  CilindroOFF();
-  PateadorOff();
-  stopMotorA(); 
-  stopMotorB(); 
-  stopMotorC();
+
 
   //Inicialización I2C
   Wire.begin();
@@ -175,23 +184,36 @@ void loop() {
     token = strtok(NULL, ",");
     if(token != NULL) patada = atoi(token);
     token = strtok(NULL, ",");
+    if(token != NULL) cilindro = atoi(token);
+    token = strtok(NULL, ",");
     if(token != NULL) Kp = atof(token);
     token = strtok(NULL, ",");
     if(token != NULL) Ki = atof(token);
   }
-
+  /*
   if(patada == 1 && patada_prev == 0){
   PateadorON(255);
   delay(120);
   PateadorOff();
   }
   //else{PateadorOff();}
-  patada_prev = patada;
+  patada_prev = patada;*/
+  if(patada == 1){
+  PateadorON(255);
+  delay(120);
+  PateadorOff();
+  }
+  //else{PateadorOff();}
+
+    if(cilindro == 1){
+  CilindroON(255);
+  }
+  else{CilindroOFF();}
 
   // =================== Cinemática ===================
 
-  //Ut_pid=Ut; //Solo para pruebas de cinematica
-  //theta_f=0; //Solo para pruebas de cinematica
+  Ut_pid=Ut; //Solo para pruebas de cinematica
+  theta_f=0; //Solo para pruebas de cinematica
   v1 = (sin(theta_f) * Ux) - (cos(theta_f) * Uy) + (L * Ut_pid);
   v2 = (cos(theta_f + PI/6) * Ux) + (sin(theta_f + PI/6) * Uy) + (L * Ut_pid);
   v3 = (-sin(theta_f + PI/3) * Ux) + (cos(theta_f + PI/3) * Uy) + (L * Ut_pid);
@@ -234,7 +256,9 @@ void loop() {
   //Serial.print(" Ki: "); Serial.print(Ki);
   Serial.print(" Pwm_a: "); Serial.print(pwm_a);
   Serial.print(" Pwm_b: "); Serial.print(pwm_b);
-  Serial.print(" Pwm_c: "); Serial.println(pwm_c);
+  Serial.print(" Pwm_c: "); Serial.print(pwm_c);
+  Serial.print(" Cilindro: ");Serial.print(cilindro);
+  Serial.print(" Patada: ");Serial.println(patada);
   
 }
 
