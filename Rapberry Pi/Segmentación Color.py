@@ -21,13 +21,25 @@ estado_pelota = 0   # 0 = no hay pelota, 1 = hay pelota
 umbral_disparo = 100  # Distancia para disparar
 target_goal=1 #Porteria Objetivo
 patada=0 #Patear o no patear
+rodillo=0 # Rodillo para control de balón
 dist_porteria1=0 ##Distancia de las porterias
 dist_porteria2=0
 
-
+#########    PID EN Y
 Kp_w = 4.0 #Proporcional
 Ki_w = 1.7 #Integral
 Kd_w = 0.0 #Derivativo
+
+######### PID EN X
+Kp_x = 3.0
+Ki_x = 1.0
+Kd_x = 0.0
+
+#### Para velocidad fija
+zona_ataque = 170   # umbral para velocidad fija
+zona_freno  = 230   # umbral para limite de area
+Ux_ataque   = 5   # velocidad fija de ataque
+
 
 #Variables para controlador
 error_x = 0.0
@@ -36,6 +48,9 @@ error_int = 0.0
 error_der=0.0
 alpha = 0.7
 dt = 0.033
+error_a_prev = 0.0
+error_a_int = 0.0
+error_a_der = 0.0
 max_w=7 #Para acotar
 
 # ===================== Abrir camara y puerto Serial =====================
@@ -180,8 +195,36 @@ while True:
             cv2.circle(frame, center, 5, (0, 0, 255), -1)
 
     if ball_detected:#Si detecta pelota
-        Ux = 3
-        Uz = 0.0
+        
+        error_a = (a_d**2 - a_p**2) / (a_d**2)   # Erro normalizado de área x
+                # Zona muerta pequeña
+        if abs(error_a) < 0.05:
+            error_a = 0
+            
+                Ux = 3
+                Uz = 0.0
+        elif zona_ataque <= a_p <= zona_freno:
+            #Velocidad fija en zona de disparo
+            Ux = Ux_ataque
+            error_a_int = 0   # reset integral para evitar acumulación
+        else:
+            # Demasiado cerca
+            Ux = 0
+            error_a_int = 0
+            
+        if a_p < zona_ataque:
+        
+            error_a_int += error_a * dt
+        # Integral
+            error_a_int += error_a * dt
+            error_a_int = np.clip(error_a_int, -1.0, 1.0)
+
+        # Derivativo
+            error_a_der = (error_a - error_a_prev) / dt
+
+        # PID
+            Ux = Kp_x * error_a + Ki_x * error_a_int + Kd_x * error_a_der
+            error_a_prev = error_a #Actualizamos error
 
         #Control Proporcional
         error_x = (x_d - x_p)/x_d #error_lateral normalizado izq(negativo) der(positivo)
@@ -259,4 +302,5 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 arduino.close()
+
 
