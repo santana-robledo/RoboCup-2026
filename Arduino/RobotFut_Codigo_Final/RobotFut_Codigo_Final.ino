@@ -201,8 +201,6 @@ void leerSensores() {
     digitalWrite(IN5, LOW); digitalWrite(IN6, LOW);
     digitalWrite(IN7, LOW); digitalWrite(IN8, LOW);
     digitalWrite(IN9, LOW); digitalWrite(IN10, LOW);
-
-
 }
 
 }
