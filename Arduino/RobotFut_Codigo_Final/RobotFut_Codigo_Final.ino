@@ -4,7 +4,7 @@
  *
  * Protocolo Serial:
  *   M,Ux,Uy,Ut,Patada,Cilindro,Kp,Ki
- *   M,0.0,0.0,0.0,0,0,2,0.5
+ *   M,0.0,0.0,0.0,0,0,N
  *
  *   o enviar solo:
  *   N  -> Sin PID angular
@@ -87,7 +87,7 @@ int pwm_a = 0, pwm_b = 0, pwm_c = 0;
 // ================== ESTRATEGIA ========================
 // =====================================================
 
-char modo = 'P';             // N, P, L
+char modo = 'N';             // N, P, L
 float ultimo_setpoint = 0;
 
 // =====================================================
@@ -181,15 +181,17 @@ void loop() {
   leerSerial();
 
   // Watchdog comunicación
-  if (millis() - lastSerialTime > 200) {
+  /*if (millis() - lastSerialTime > 200) {
     Ux = 0;
     Uy = 0;
     Ut = 0;
-  }
+  } */
 
   controlOrientacion();
   cinematica();
   aplicarMotores();
+  //DebugPrint();
+
 }
 
 // =====================================================
@@ -226,15 +228,17 @@ void leerSerial() {
   if (!Serial.available()) return;
 
   String input = Serial.readStringUntil('\n');
+  input.trim();  // elimina \r y espacios
 
-  // Cambio de estrategia
   if (input.length() == 1) {
     modo = input.charAt(0);
     return;
   }
 
-  char buffer[60];
-  input.toCharArray(buffer, 60);
+  if (input.charAt(0) != 'M') return;
+
+  char buffer[80];
+  input.toCharArray(buffer, 80);
 
   char *token = strtok(buffer, ",");
 
@@ -255,6 +259,7 @@ void controlOrientacion() {
     case 'N':   // sin PID
       Ut_pid = 0;
       error_int = 0;
+      setpoint = theta_f; 
       break;
 
     case 'P':   // PID activo
@@ -282,12 +287,19 @@ void controlOrientacion() {
 
 void cinematica() {
 
-  // ===== FILTRO DE VELOCIDAD =====
-  Ux = alpha * Ux + (1 - alpha) * Ux_prev;
-  Uy = alpha * Uy + (1 - alpha) * Uy_prev;
+   //===== FILTRO DE VELOCIDAD =====
+if (Ux == 0 && Uy == 0) {
+    Ux_prev = 0;
+    Uy_prev = 0;
+}
+else {
+    Ux = alpha * Ux + (1 - alpha) * Ux_prev;
+    Uy = alpha * Uy + (1 - alpha) * Uy_prev;
 
-  Ux_prev = Ux;
-  Uy_prev = Uy;
+    Ux_prev = Ux;
+    Uy_prev = Uy;
+    }
+
 
   // ===== TRANSFORMACIÓN CAMPO GLOBAL =====
   float Ux_robot = cos(theta_f) * Ux + sin(theta_f) * Uy;
@@ -295,17 +307,23 @@ void cinematica() {
 
   float Ut_total = (modo == 'N') ? Ut : Ut_pid;
 
-  //v1 = (sin(theta_f) * Ux_robot) - (cos(theta_f) * Uy_robot) + (L * Ut_total);
-  //v2 = (cos(theta_f + PI/6) * Ux_robot) + (sin(theta_f + PI/6) * Uy_robot) + (L * Ut_total);
-  //v3 = (-sin(theta_f + PI/3) * Ux_robot) + (cos(theta_f + PI/3) * Uy_robot) + (L * Ut_total);
+  v1 = (sin(theta_f) * Ux_robot) - (cos(theta_f) * Uy_robot) + (L * Ut_total);
+  v2 = (cos(theta_f + PI/6) * Ux_robot) + (sin(theta_f + PI/6) * Uy_robot) + (L * Ut_total);
+  v3 = (-sin(theta_f + PI/3) * Ux_robot) + (cos(theta_f + PI/3) * Uy_robot) + (L * Ut_total);
 
+/*
   v1 = (-Uy_robot) + (L * Ut_total);
   v2 = ( (sqrt(3)/2)*Ux_robot + 0.5*Uy_robot ) + (L * Ut_total);
   v3 = ( (-sqrt(3)/2)*Ux_robot + 0.5*Uy_robot ) + (L * Ut_total);
+*/
 
   wa = v1 / R;
   wb = v2 / R;
   wc = v3 / R;
+
+  if (abs(wa) < 0.2) wa = 0;
+  if (abs(wb) < 0.2) wb = 0;
+  if (abs(wc) < 0.2) wc = 0;
 
 // ===== LIMITADOR GLOBAL PROPORCIONAL =====
 float max_w = max(abs(wa), max(abs(wb), abs(wc)));
@@ -323,24 +341,60 @@ if (max_w > max_limit) {
   pwm_a = mapPWM(wa, MAX_RAD_A);
   pwm_b = mapPWM(wb, MAX_RAD_B);
   pwm_c = mapPWM(wc, MAX_RAD_C);
-}
 
+}
 void aplicarMotores() {
 
-  if (wa > 0) { digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); }
-  else if (wa < 0) { digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH); }
-  else { digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); }
-  analogWrite(ENA, pwm_a);
+// ===== MOTOR A =====
+if (pwm_a == 0) {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, LOW);
+    analogWrite(ENA, 0);
+}
+else if (wa > 0) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    analogWrite(ENA, pwm_a);
+}
+else {
+    digitalWrite(IN1, LOW);
+    digitalWrite(IN2, HIGH);
+    analogWrite(ENA, pwm_a);
+}
 
-  if (wb > 0) { digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); }
-  else if (wb < 0) { digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH); }
-  else { digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); }
-  analogWrite(ENB, pwm_b);
+// ===== MOTOR B =====
+if (pwm_b == 0) {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, LOW);
+    analogWrite(ENB, 0);
+}
+else if (wb > 0) {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+    analogWrite(ENB, pwm_b);
+}
+else {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+    analogWrite(ENB, pwm_b);
+}
 
-  if (wc > 0) { digitalWrite(IN5, LOW); digitalWrite(IN6, HIGH); }
-  else if (wc < 0) { digitalWrite(IN5, HIGH); digitalWrite(IN6, LOW); }
-  else { digitalWrite(IN5, LOW); digitalWrite(IN6, LOW); }
-  analogWrite(ENC, pwm_c);
+// ===== MOTOR C =====
+if (pwm_c == 0) {
+    digitalWrite(IN5, LOW);
+    digitalWrite(IN6, LOW);
+    analogWrite(ENC, 0);
+}
+else if (wc > 0) {
+    digitalWrite(IN6, HIGH);
+    digitalWrite(IN5, LOW);
+    analogWrite(ENC, pwm_c);
+}
+else {
+    digitalWrite(IN6, LOW);
+    digitalWrite(IN5, HIGH);
+    analogWrite(ENC, pwm_c);
+}
 }
 
 int mapPWM(float w, float max_rads) {
@@ -358,4 +412,23 @@ int mapPWM(float w, float max_rads) {
   pwm = constrain(pwm, 0, 255);
 
   return pwm;
+}
+
+void DebugPrint(){
+  Serial.print("Theta(rad): "); Serial.print(theta_f);
+  //Serial.print(" Ux:"); Serial.print(Ux);
+  //Serial.print(" Uy:"); Serial.print(Uy);
+  //Serial.print(" Ut:"); Serial.print(Ut);
+  //Serial.print(" Kp: "); Serial.print(Kp);
+  //Serial.print(" Ki: "); Serial.print(Ki);
+  Serial.print(" Pwm_a: "); Serial.print(pwm_a);
+  Serial.print(" Pwm_b: "); Serial.print(pwm_b);
+  Serial.print(" Pwm_c: "); Serial.print(pwm_c);
+  Serial.print(" Cilindro: ");Serial.print(cilindro);
+  Serial.print(" EstadoPelota: ");Serial.print(estadoPelota);
+  Serial.print(" wa: "); Serial.print(wa);
+  Serial.print(" wb: "); Serial.print(wb);
+  Serial.print(" wc: "); Serial.print(wc);
+  Serial.print(" modo: "); Serial.print(modo);
+  Serial.print(" Patada: ");Serial.println(patada);
 }
