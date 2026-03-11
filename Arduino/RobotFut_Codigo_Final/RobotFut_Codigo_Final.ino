@@ -168,6 +168,8 @@ void loop() {
     modo='N';
   }
 
+  float Ut_total = obtenerUtTotal();
+  
   if(Ux==0 && Uy==0 && Ut_total==0){ //Freno activo
     pwm_a=pwm_b=pwm_c=0;
   }
@@ -234,7 +236,7 @@ void leerSerial() {
   token = strtok(NULL, ","); if (token) cilindro = atoi(token);
   token = strtok(NULL, ","); if (token) modo = token[0];
 
-  //lastSerialTime = millis();
+  lastSerialTime = millis();
 }
 
 void controlOrientacion() {
@@ -417,4 +419,9 @@ void DebugPrint(){
   Serial.print(" wc: "); Serial.print(wc);
   Serial.print(" modo: "); Serial.print(modo);
   Serial.print(" Patada: ");Serial.println(patada);
+}
+
+float obtenerUtTotal(){
+  if(modo=='N') return Ut;
+  else return Ut_pid;
 }
