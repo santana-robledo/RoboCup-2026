@@ -181,11 +181,11 @@ void loop() {
   leerSerial();
 
   // Watchdog comunicación
-  /*if (millis() - lastSerialTime > 200) {
+  if (millis() - lastSerialTime > 200) {
     Ux = 0;
     Uy = 0;
     Ut = 0;
-  } */
+  }
 
   controlOrientacion();
   cinematica();
