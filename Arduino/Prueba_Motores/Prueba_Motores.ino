@@ -1,35 +1,48 @@
+#include <Wire.h>
+#include <MPU6050.h>
 
-// ===== MOTOR A Right =====
-#define IN1 23 // Morado Derecho
-#define IN2 22 // Azul Derecho
-#define ENA 5  // Gris Derecho
+MPU6050 mpu;
+
+bool leerMPU = false;
+
+float yaw = 0;
+unsigned long lastTime = 0;
+
+//////////////  DERECHO ////////////////
+// ===== MOTOR A =====
+#define IN1  49
+#define IN2  47
+#define ENA   4
 
 // ===== MOTOR B Left =====
-#define IN3 24 // Morado Izquierdo IN1
-#define IN4 25 // Gris Izquierdo IN2    
-#define ENB 6  // Azul Izquierdo
+#define IN3   26// Morado Izquierdo IN1
+#define IN4  39 // Gris Izquierdo IN2    
+#define ENB   8// Azul Izquierdo
 
+//////////////  IZQUIERDO ////////////////
 // ===== MOTOR C =====
-#define IN5 26 // Verde Derecho IN3
-#define IN6 27 // Amarillo Derecho IN4
-#define ENC 7  // Naranja Derecho
+#define IN5 28
+#define IN6  31
+#define ENC 7
 
 // ===== MOTOR Cilindro =====
-#define IN7 28 // 
-#define IN8 29 // 
-#define END 9  // 
+#define IN7 52 // 
+#define IN8 53 // 
+#define END 6  // 
 
 // ===== Pateador =====
-#define IN9 30 // 
-#define IN10 31 // 
-#define ENE 8  //
+#define RELE 12  //
 
 float wa = 0.0;
 float wb = 0.0;
 float wc = 0.0;
+bool leerSensor = false;
+
+String comando = "";
 
 void setup() {
   Serial.begin(115200);
+
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(ENA, OUTPUT);
@@ -46,135 +59,146 @@ void setup() {
   pinMode(IN8, OUTPUT);
   pinMode(END, OUTPUT);
 
-  pinMode(IN9, OUTPUT);
-  pinMode(IN10, OUTPUT);
-  pinMode(ENE, OUTPUT);
+  pinMode(RELE, OUTPUT);
+  digitalWrite(RELE, LOW);
+  
 
   stopMotorA();
   stopMotorB();
   stopMotorC();
   CilindroOFF();
   PateadorOff();
+  Wire.begin();
+  mpu.initialize();
+
+  if (!mpu.testConnection()) {
+    Serial.println("Error MPU6050");
+  } else {
+    Serial.println("MPU6050 listo");
+  }
+
+  lastTime = millis();
 
   Serial.println("Listo. Manda comando");
-
 }
 
 void loop() {
-  /*
-  if (analogRead(A0) > 120) {
-    Serial.print("BLANCO A0");
-  } else {
-    Serial.print("NEGRO A0");
-  }
 
-   if (analogRead(A1) > 120) {
-    Serial.print("BLANCO A1");
-  } else {
-    Serial.print("NEGRO A1");
-  }
+  while (Serial.available()) {
+    char c = Serial.read();
 
-   if (analogRead(A2) > 120) {
-    Serial.print("BLANCOA2");
-  } else {
-    Serial.print("NEGRO A2");
-  }
+    if (c == '\n') {  // comando completo
+      comando.trim();
 
-   if (analogRead(A3) > 120) {
-    Serial.print("BLANCO A3");
-  } else {
-    Serial.print("NEGRO A3");
-  }
+      if (comando.length() == 0) return;
 
-   if (analogRead(A4) > 120) {
-    Serial.print("BLANCO A4");
-  } else {
-    Serial.print("NEGRO A4");
-  }
+      Serial.println(comando);
 
-   if (analogRead(A5) > 120) {
-    Serial.print("BLANCO A5");
-  } else {
-    Serial.print("NEGRO A5");
-  }
-*/
-  if (Serial.available()) {
+      char motor = comando.charAt(0);
+      int pwm = 0;
 
-    String comando = Serial.readStringUntil('\n');
-    comando.trim();
-    Serial.println(comando);
+      if (comando.length() > 1) {
+        pwm = comando.substring(1).toInt();
+        pwm = constrain(pwm, -255, 255);
+      }
 
-    if (comando.length() == 0) return;
+      switch(motor){
 
-    char motor = comando.charAt(0);
-    int pwm = 0;
+        case 'A':
+          if(pwm > 0) motorA_forward(pwm);
+          else if(pwm < 0) motorA_backward(abs(pwm));
+          else stopMotorA();
+          break;
 
-    if (comando.length() > 1) {
-      pwm = comando.substring(1).toInt();
-      pwm = constrain(pwm, -255, 255);
-    }
+        case 'B':
+          if(pwm > 0) motorB_forward(pwm);
+          else if(pwm < 0) motorB_backward(abs(pwm));
+          else stopMotorB();
+          break;
 
-    switch(motor){
+        case 'C':
+          if(pwm > 0) motorC_forward(pwm);
+          else if(pwm < 0) motorC_backward(abs(pwm));
+          else stopMotorC();
+          break;
 
-      case 'A':   // Motor A
-        if(pwm > 0) motorA_forward(pwm);
-        else if(pwm < 0) motorA_backward(abs(pwm));
-        else stopMotorA();
-        break;
+        case 'S':
+          stopMotorA();
+          stopMotorB();
+          stopMotorC();
+          CilindroOFF();
+          break;
+        
+        case 'Q':
+          PateadorON();
+          break;
+        
+        case 'W':
+          PateadorOff();
+          break;
 
-      case 'B':   // Motor B
-        if(pwm > 0) motorB_forward(pwm);
-        else if(pwm < 0) motorB_backward(abs(pwm));
-        else stopMotorB();
-        break;
+        case 'E':
+          leerSensor = true;
+          leerMPU = false;
+          break;
 
-      case 'C':   // Motor C
-        if(pwm > 0) motorC_forward(pwm);
-        else if(pwm < 0) motorC_backward(abs(pwm));
-        else stopMotorC();
-        break;
+        case 'F':
+          leerSensor = false;
+          leerMPU = false;
+          break;
 
-      case 'S':   // STOP todo
-        stopMotorA();
-        stopMotorB();
-        stopMotorC();
-        break;
-      
-      case 'Q':
-        moverFrente(pwm);
-        break;
-      
-      case 'W':
-        moverAtras(pwm);
-        break;
+        case 'D':
+          if(pwm > 0) CilindroON(pwm);
+          else if(pwm < 0) CilindroON(abs(pwm));
+          else CilindroOFF();
+          break;
+        
+        case 'Z':
+          leerMPU = true;
+          leerSensor = false;
+          break;
 
-      case 'E':
-        GirarDerecha(pwm);
-        break;
+        case 'X':
+          leerMPU = false;
+          leerSensor = false;
+          break;
 
-      case 'R':
-        GirarIzquierda(pwm);
-        break;
+        default:
+          stopMotorA();
+          stopMotorB();
+          stopMotorC();
+          break;
+      }
 
-      case 'T':
-        if(pwm > 0) CilindroON(pwm);
-        else if(pwm < 0) CilindroON(abs(pwm));
-        else CilindroOFF();
-        break;
+      comando = "";  // limpiar buffer
 
-      case 'Y':
-        if(pwm > 0) PateadorON(pwm);
-        else if(pwm < 0) PateadorON(abs(pwm));
-        else PateadorOff();
-        break;
-
-      default:
-        stopMotorA();
-        stopMotorB();
-        stopMotorC();
-        break;
+    } else {
+      comando += c;  // acumular caracteres
     }
   }
+  if (leerSensor) {
+  int sensorValue = analogRead(A1);
+  Serial.println(sensorValue);
+  delay(50);
+}
+
+if (leerMPU) {
+
+  int16_t gx, gy, gz;
+  mpu.getRotation(&gx, &gy, &gz);
+
+  unsigned long currentTime = millis();
+  float dt = (currentTime - lastTime) / 1000.0;
+  lastTime = currentTime;
+
+  // rad/s
+  float gz_rad = (gz / 131.0) * (PI / 180.0);
+
+  // integrar yaw
+  yaw += gz_rad * dt;
+
+  Serial.println(yaw);
+}
 }
 
 // ================= FUNCIONES =================
@@ -242,10 +266,7 @@ void moverFrente(int pwm){
 
   stopMotorA();
   motorB_forward(pwm);
-  delay(2000);
   motorC_forward(pwm);
-
-  
 }
 
 void moverAtras(int pwm){
@@ -270,21 +291,14 @@ void GirarIzquierda(int pwm){
   motorA_forward(pwm);
   motorB_backward(pwm/2);
   motorC_backward(pwm/2);
-  
 }
 
-void PateadorON(int pwm){
-  pwm = constrain(pwm, 0, 255);
-  digitalWrite(IN9, LOW);
-  digitalWrite(IN10, HIGH);
-  analogWrite(ENE, pwm);
-  
+void PateadorON(){
+  digitalWrite(RELE, HIGH);
 }
 
 void PateadorOff(){ 
-  digitalWrite(IN9, LOW);
-  digitalWrite(IN10, LOW);
-  analogWrite(ENE, 0);
+  digitalWrite(RELE, LOW);
 }
 
 void CilindroOFF(){   
