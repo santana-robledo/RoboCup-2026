@@ -3,7 +3,7 @@
 
 MPU6050 mpu;
 
-bool leerMPU = false;
+bool modoDebug = false;
 
 float yaw = 0;
 unsigned long lastTime = 0;
@@ -62,6 +62,7 @@ void setup() {
 
   pinMode(RELE, OUTPUT);
   digitalWrite(RELE, LOW);
+  pinMode(sensor,INPUT_PULLUP);
   
 
   stopMotorA();
@@ -139,29 +140,17 @@ void loop() {
           break;
 
         case 'E':
-          leerSensor = true;
-          leerMPU = false;
+          modoDebug = true;
           break;
 
         case 'F':
-          leerSensor = false;
-          leerMPU = false;
+          modoDebug = false;
           break;
 
         case 'D':
           if(pwm > 0) CilindroON(pwm);
           else if(pwm < 0) CilindroON(abs(pwm));
           else CilindroOFF();
-          break;
-        
-        case 'Z':
-          leerMPU = true;
-          leerSensor = false;
-          break;
-
-        case 'X':
-          leerMPU = false;
-          leerSensor = false;
           break;
 
         default:
@@ -177,14 +166,8 @@ void loop() {
       comando += c;  // acumular caracteres
     }
   }
-  if (leerSensor) {
+  if (modoDebug) {
   int sensorValue = digitalRead(sensor);
-  Serial.println(sensorValue);
-  delay(50);
-}
-
-if (leerMPU) {
-
   int16_t gx, gy, gz;
   mpu.getRotation(&gx, &gy, &gz);
 
@@ -192,17 +175,16 @@ if (leerMPU) {
   float dt = (currentTime - lastTime) / 1000.0;
   lastTime = currentTime;
 
-  // rad/s
   float gz_rad = (gz / 131.0) * (PI / 180.0);
-
-  // integrar yaw
   yaw += gz_rad * dt;
-
+  Serial.print("Sensor: ");
+  Serial.print(sensorValue);
+  Serial.print(" | Yaw: ");
   Serial.println(yaw);
-}
-}
 
-// ================= FUNCIONES =================
+  delay(50);
+}
+}
 
 // ---- STOP ----
 void stopMotorA() {
