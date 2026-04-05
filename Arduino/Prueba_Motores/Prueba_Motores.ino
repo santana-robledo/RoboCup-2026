@@ -11,7 +11,7 @@ unsigned long lastTime = 0;
 //////////////  DERECHO ////////////////
 // ===== MOTOR A =====
 #define IN1  49
-#define IN2  47
+#define IN2  52
 #define ENA   4
 
 // ===== MOTOR B Left =====
@@ -26,12 +26,13 @@ unsigned long lastTime = 0;
 #define ENC 7
 
 // ===== MOTOR Cilindro =====
-#define IN7 52 // 
+#define IN7 51 // 
 #define IN8 53 // 
 #define END 6  // 
 
 // ===== Pateador =====
 #define RELE 12  //
+int sensor=33;
 
 float wa = 0.0;
 float wb = 0.0;
@@ -177,7 +178,7 @@ void loop() {
     }
   }
   if (leerSensor) {
-  int sensorValue = analogRead(A1);
+  int sensorValue = digitalRead(sensor);
   Serial.println(sensorValue);
   delay(50);
 }
