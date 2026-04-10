@@ -1,344 +1,268 @@
-#include "I2Cdev.h" //Para comunicación 12C
-#include "SparkFun_BNO080_Arduino_Library.h" //Para IMU
+#include "I2Cdev.h"
+#include <MPU6050.h>
+#include <Wire.h>
 
 /* 
 Forma de enviar los datos
 M,0.0,0.0,0.0,0,0,3.0,0.0
 X    Y   t  P C  Kp  Ki
  */
- 
- //Constantes de velocidad máxima, RPM a radianes
-const float MAX_RAD_A = 130 * 2 * PI / 60; //13.61 
-const float MAX_RAD_B = 170 * 2 * PI / 60; //17.80 rad/s
-const float MAX_RAD_C = 170 * 2 * PI / 60; //17.80 rad/s
 
+//Constantes de velocidad máxima
+const float MAX_RAD_A = 130 * 2 * PI / 60;
+const float MAX_RAD_B = 170 * 2 * PI / 60;
+const float MAX_RAD_C = 170 * 2 * PI / 60;
 
 int estadoPelota = 0;
+unsigned long lastSerialTime = 0;
 int estadoPelotaPrev = -1;
+
 int patada = 0;
-int cilindro = 0;
 int patada_prev = 0;
+int cilindro = 0;
+
 unsigned long tiempoPatada = 0;
 bool pateando = false;
 
-BNO080 myIMU; //Objeto IMU
-#define PIN_INT 2 //Pin de interrupción
-#define PIN_RST 4 //Pin de reset
-#define IMU_ADDR 0x4B // o 0x4B
+MPU6050 mpu;
 
-//Variables de orientación
-float rawTheta = 0.0;
-float theta = 0.0;     // ángulo acumulado en radianes
-float wz = 0.0;        // velocidad angular en rad/s
-float bias = 0.0;      // bias del giroscopio
-float dt = 0.0;        //tiempo
-
+//Variables IMU
+float theta_f = 0.0;
+float wz = 0.0;
+float bias_z = 0.0;
+float dt = 0.0;
 
 unsigned long lastTime = 0;
 
-float yawAngle = 0;
-
-//Variables del robot
-float L = 0.09, R = 0.029; //Distancia centro-rueda, radio de la rueda
-//Velocidades del robot
+//Robot
+float L = 0.09, R = 0.029;
 float Ux = 0.0, Uy = 0.0, Ut = 0.0;
 float v1 = 0.0, v2 = 0.0, v3 = 0.0;
+
 int pwm_a = 0, pwm_b = 0, pwm_c = 0;
 
-float alpha = 0.3;
-static float theta_f = 0;
-unsigned long now = 0;
-float Ut_pid = 0.0; //salida del PID
-float theta_deg=0.0; //ángulo actual en grados
+float Ut_pid = 0.0;
 
-// ===== MOTOR A Right =====
-#define IN1 23 // Morado Derecho
-#define IN2 22 // Azul Derecho
-#define ENA 5  // Gris Derecho
+//////////////  DERECHO ////////////////
+// ===== MOTOR A =====
+#define IN1  52
+#define IN2  49
+#define ENA   4
 
 // ===== MOTOR B Left =====
-#define IN3 24 // Morado Izquierdo IN1
-#define IN4 25 // Gris Izquierdo IN2    
-#define ENB 6  // Azul Izquierdo
+#define IN3   26// Morado Izquierdo IN1
+#define IN4  39 // Gris Izquierdo IN2    
+#define ENB   8// Azul Izquierdo
 
+//////////////  IZQUIERDO ////////////////
 // ===== MOTOR C =====
-#define IN5 26 // Verde Derecho IN3
-#define IN6 27 // Amarillo Derecho IN4
-#define ENC 7  // Naranja Derecho
+#define IN5 28
+#define IN6  31
+#define ENC 7
 
 // ===== MOTOR Cilindro =====
-#define IN7 28 // Negro Izquierd
-#define IN8 29 // Blanco Izquierdo
-#define END 3  // Cafe Izquierdo
+#define IN7 51 // 
+#define IN8 53 // 
+#define END 6  // 
 
 // ===== Pateador =====
-#define IN9 31 // 
-#define IN10 30 // 
-#define ENE 8  //
+#define RELE 12  //
+#define SENSOR_PELOTA 33
 
-#define SENSOR_PELOTA 9 //detectamos si tenemos pelota o no
 
 float wa = 0.0, wb = 0.0, wc = 0.0;
-/////// Ganancias PID para orientación /////
-float Kp = 20;
-float Ki = 5;
-float Kd = 0.2;
 
-float setpoint = 0.0; //Angulo al que queremos apuntar
+//PID
+float Kp = 3;
+float Ki = 1;
+float Kd = 0.0;
 
-//Variables internas del PID
+float setpoint = 0.0;
+
 float error = 0.0;
-float error_prev = 0.0;
 float error_int = 0.0;
-float error_der = 0.0;
 
 void setup() {
-  CilindroOFF();
-  PateadorOff();
-  stopMotorA(); 
-  stopMotorB(); 
-  stopMotorC();
+
   Serial.begin(115200);
-  while(!Serial);
-  Serial.setTimeout(20);
-
-  pinMode(SENSOR_PELOTA, INPUT);
-
-  pinMode(IN1, OUTPUT); 
-  pinMode(IN2, OUTPUT); 
-  pinMode(ENA, OUTPUT);
-  
-  pinMode(IN3, OUTPUT); 
-  pinMode(IN4, OUTPUT); 
-  pinMode(ENB, OUTPUT);
-  
-  pinMode(IN5, OUTPUT); 
-  pinMode(IN6, OUTPUT); 
-  pinMode(ENC, OUTPUT);
-
-  pinMode(IN7, OUTPUT);
-  pinMode(IN8, OUTPUT);
-  pinMode(END, OUTPUT);
-  digitalWrite(IN7, LOW);
-  digitalWrite(IN8, LOW);
-  analogWrite(END, 0);
-
-
-  pinMode(IN9, OUTPUT);
-  pinMode(IN10, OUTPUT);
-  pinMode(ENE, OUTPUT);
-
-  pinMode(SENSOR_PELOTA, INPUT);
-
-  //Inicialización I2C
   Wire.begin();
   Wire.setClock(400000);
-  Wire.setWireTimeout(3000, true);//400 kHz
 
-  if (myIMU.begin(IMU_ADDR, Wire, PIN_INT) == false) { //Inicializar IMU
-    Serial.println("Error de conexión con BNO080.");
-    while(1);
+  mpu.initialize();
+
+  if (!mpu.testConnection()) {
+    Serial.println("Error MPU6050");
+    while (1);
   }
-  myIMU.enableRotationVector(50);//Activar medición, lee cada 50 ms
 
- 
+  long sum = 0;
+  for (int i = 0; i < 2000; i++) {
+    int16_t gx, gy, gz;
+    mpu.getRotation(&gx, &gy, &gz);
+    sum += gz;
+    delay(2);
+  }
+  bias_z = sum / 2000.0;
+
+  pinMode(SENSOR_PELOTA, INPUT_PULLUP);
+
+  pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT); pinMode(ENA, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
+  pinMode(IN5, OUTPUT); pinMode(IN6, OUTPUT); pinMode(ENC, OUTPUT);
+
+  pinMode(IN7, OUTPUT); pinMode(IN8, OUTPUT); pinMode(END, OUTPUT);
+  pinMode(RELE, OUTPUT);
+  digitalWrite(RELE, LOW);
+  stopMotorA();
+  stopMotorB();
+  stopMotorC();
+  patada=0;
+
   lastTime = micros();
 }
 
 void loop() {
+    if (millis() - lastSerialTime > 500) {
+      Ux = 0;
+      Uy = 0;
+      Ut = 0;
+      Ut_pid=0;
+      error_int=0;
+      cilindro=0;
+      patada=0;
+      digitalWrite(RELE, LOW);
+      stopMotorA();
+      stopMotorB();
+      stopMotorC();
+  }
   estadoPelota = digitalRead(SENSOR_PELOTA);
-  if (estadoPelota != estadoPelotaPrev) {
-  Serial.print("P,");
-  Serial.println(estadoPelota);
-  estadoPelotaPrev = estadoPelota;
-}
-  unsigned long currentTime = micros(); //tiempo actual
-  dt = (currentTime - lastTime) / 1000000.0; //Calcula cuánto tiempo pasó desde la última iteración en segundos
-  lastTime = currentTime; //Actualiza tiempo
-  if (dt <= 0) dt = 0.0001; //Evitar división entre 0
+  //Serial.print("P,");Serial.println(estadoPelota);
 
-  if (myIMU.dataAvailable() == true)
-  {
-    theta_f = myIMU.getYaw();//Obtiene el angulo
+  if(patada == 1 && patada_prev == 0 && !pateando){
+    digitalWrite(RELE, HIGH);
+    tiempoPatada = millis();
+    pateando = true;
   }
 
-  if (isnan(error_int)) error_int = 0; //Protege variable de ser corrompida
-  if (isnan(error)) error = 0; //Protege variable de ser corrompida
-  error = setpoint - theta_f; //Calculamos error en angulo para PID en radianes
-  error = atan2(sin(error), cos(error)); //Normalizar error angular
+  //Tiempo de activación
+  if(pateando && millis() - tiempoPatada >= 120){
+    digitalWrite(RELE, LOW);
+    pateando = false;
+  }
 
-  error_int += error * dt; //Acumula error
-  error_int = constrain(error_int, -2.0, 2.0);//limitamos error (π/180)
+  //Guardar estado anterior
+  patada_prev = patada;
 
-  Ut_pid = Kp*error + Ki*error_int ; // Calcula velocidad angular deseada.
+  //Tiempo
+  unsigned long currentTime = micros();
+  dt = (currentTime - lastTime) / 1000000.0;
+  lastTime = currentTime;
+  if (dt <= 0) dt = 0.0001;
+
+  int16_t gx, gy, gz;
+  mpu.getRotation(&gx, &gy, &gz);
+
+  wz = ((gz - bias_z) / 131.0) * PI / 180.0;
+  theta_f += wz * dt;
+  theta_f = atan2(sin(theta_f), cos(theta_f));
+
+  //PID
+  error = setpoint - theta_f;
+  error = atan2(sin(error), cos(error));
+
+  error_int += error * dt;
+  error_int = constrain(error_int, -2.0, 2.0);
+
+  Ut_pid = Kp * error + Ki * error_int;
   Ut_pid = constrain(Ut_pid, -4.0, 4.0);
-  
-  // =================== Lectura serial ===================
+
+  //Serial
   if (Serial.available() > 0) {
+    lastSerialTime = millis(); 
     String input = Serial.readStringUntil('\n');
-    char inputBuffer[50];
-    input.toCharArray(inputBuffer, 50);
+    char buffer[50];
+    input.toCharArray(buffer, 50);
 
-    char *token = strtok(inputBuffer, ","); // M
-    token = strtok(NULL, ","); // Ux
-    if(token != NULL) Ux = atof(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) Uy = atof(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) Ut = atof(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) patada = atoi(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) cilindro = atoi(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) Kp = atof(token);
-    token = strtok(NULL, ",");
-    if(token != NULL) Ki = atof(token);
+    char *token = strtok(buffer, ",");
+    token = strtok(NULL, ","); if(token) Ux = atof(token);
+    token = strtok(NULL, ","); if(token) Uy = atof(token);
+    token = strtok(NULL, ","); if(token) Ut = atof(token);
+    token = strtok(NULL, ","); if(token) patada = atoi(token);
+    token = strtok(NULL, ","); if(token) cilindro = atoi(token);
+    //token = strtok(NULL, ","); if(token) Kp = atof(token);
+    //token = strtok(NULL, ","); if(token) Ki = atof(token);
   }
-  
-if(patada == 1 && !pateando){
-  PateadorON(255);
-  tiempoPatada = millis();
-  pateando = true;
-}
 
-if(pateando && millis() - tiempoPatada >= 120){
-  PateadorOff();
-  pateando = false;
-  patada = 0;
-}
-
-    if(cilindro == 1){
-  CilindroON(255);
+  //Pateador
+  if(patada == 1 && !pateando){
+    digitalWrite(RELE, HIGH);
+    tiempoPatada = millis();
+    pateando = true;
   }
-  else{CilindroOFF();}
 
-  // =================== Cinemática ===================
+  if(pateando && millis() - tiempoPatada >= 120){
+    digitalWrite(RELE, LOW);
+    pateando = false;
+    patada = 0;
+  }
 
-  Ut_pid=Ut; //Solo para pruebas de cinematica
-  theta_f=0; //Solo para pruebas de cinematica
+  //Cilindro
+  if(cilindro == 1){
+    digitalWrite(IN7, LOW);
+    digitalWrite(IN8, HIGH);
+    analogWrite(END, 255);
+  } else {
+    digitalWrite(IN7, LOW);
+    digitalWrite(IN8, LOW);
+    analogWrite(END, 0);
+  }
+
+  //Cinemática
+  //Ut_pid=Ut;
+  //theta_f=0;
   v1 = (sin(theta_f) * Ux) - (cos(theta_f) * Uy) + (L * Ut_pid);
   v2 = (cos(theta_f + PI/6) * Ux) + (sin(theta_f + PI/6) * Uy) + (L * Ut_pid);
   v3 = (-sin(theta_f + PI/3) * Ux) + (cos(theta_f + PI/3) * Uy) + (L * Ut_pid);
 
-  //Convertimos a velocidad angular
-  //v=ωR Entonces ω=v/R
   wa = v1 / R;
   wb = v2 / R;
   wc = v3 / R;
 
-  /*
-  Serial.print("Ut_pid: "); Serial.println(Ut_pid);Serial.print("error: "); Serial.println(error);
-  Serial.print("dt: "); Serial.println(dt);Serial.print(" wa: "); Serial.print(wa);Serial.print(" wb: "); Serial.print(wb);Serial.print(" wc: "); Serial.println(wc);
-  */
-
-  //Convertir a PWM
   pwm_a = mapPWM(wa, MAX_RAD_A);
   pwm_b = mapPWM(wb, MAX_RAD_B);
   pwm_c = mapPWM(wc, MAX_RAD_C);
 
-  // =================== Motor control ===================
-  if (wa > 0) motorA_forward(pwm_a);
-  else if (wa < 0) motorA_backward(pwm_a);
-  else stopMotorA();
+  //Motores
+  (wa > 0) ? motorA_forward(pwm_a) : (wa < 0) ? motorA_backward(pwm_a) : stopMotorA();
+  (wb > 0) ? motorB_forward(pwm_b) : (wb < 0) ? motorB_backward(pwm_b) : stopMotorB();
+  (wc > 0) ? motorC_forward(pwm_c) : (wc < 0) ? motorC_backward(pwm_c) : stopMotorC();
 
-  if (wb > 0) motorB_forward(pwm_b);
-  else if (wb < 0) motorB_backward(pwm_b);
-  else stopMotorB();
-
-  if (wc > 0) motorC_forward(pwm_c);
-  else if (wc < 0) motorC_backward(pwm_c);
-  else stopMotorC();
-
-  // =================== Debug ===================
-  Serial.print("Theta(rad): "); Serial.print(theta_f);
-  //Serial.print(" Ux:"); Serial.print(Ux);
-  //Serial.print(" Uy:"); Serial.print(Uy);
-  //Serial.print(" Ut:"); Serial.print(Ut);
-  //Serial.print(" Kp: "); Serial.print(Kp);
-  //Serial.print(" Ki: "); Serial.print(Ki);
-  Serial.print(" Pwm_a: "); Serial.print(pwm_a);
-  Serial.print(" Pwm_b: "); Serial.print(pwm_b);
-  Serial.print(" Pwm_c: "); Serial.print(pwm_c);
-  Serial.print(" Cilindro: ");Serial.print(cilindro);
-  Serial.print(" EstadoPelota: ");Serial.print(estadoPelota);
-  Serial.print(" Patada: ");Serial.println(patada);
-  
+  //Debug
+//Debug
+/*
+  Serial.print("Theta: "); Serial.print(theta_f);
+  Serial.print(" PWM A: "); Serial.print(pwm_a);
+  Serial.print(" PWM B: "); Serial.print(pwm_b);
+  Serial.print(" PWM C: "); Serial.print(pwm_c);
+  Serial.print(" Pelota: "); Serial.print(estadoPelota);
+  Serial.print(" Patada: "); Serial.print(patada);
+  Serial.print(" Rodillo: "); Serial.println(cilindro);*/
 }
 
-void stopMotorA(){
-  digitalWrite(IN1, LOW); 
-  digitalWrite(IN2, LOW); 
-  analogWrite(ENA,0);}
-  
-void motorA_forward(int PWM){
-  digitalWrite(IN1,HIGH); 
-  digitalWrite(IN2,LOW); 
-  analogWrite(ENA,PWM);}
-  
-void motorA_backward(int PWM){
-  digitalWrite(IN1,LOW); 
-  digitalWrite(IN2,HIGH); 
-  analogWrite(ENA,PWM);}
-  
-void stopMotorB(){
-  digitalWrite(IN3, LOW); 
-  digitalWrite(IN4, LOW); 
-  analogWrite(ENB,0);}
-  
-void motorB_forward(int PWM){
-  digitalWrite(IN3,HIGH); 
-  digitalWrite(IN4,LOW); 
-  analogWrite(ENB,PWM);}
-  
-void motorB_backward(int PWM){
-  digitalWrite(IN3,LOW); 
-  digitalWrite(IN4,HIGH); 
-  analogWrite(ENB,PWM);}
-  
-void stopMotorC(){
-  digitalWrite(IN5, LOW); 
-  digitalWrite(IN6, LOW); 
-  analogWrite(ENC,0);}
-  
-void motorC_forward(int PWM){
-  digitalWrite(IN5,HIGH); 
-  digitalWrite(IN6,LOW); 
-  analogWrite(ENC,PWM);}
-  
-void motorC_backward(int PWM){
-  digitalWrite(IN5,LOW); 
-  digitalWrite(IN6,HIGH); 
-  analogWrite(ENC,PWM);}
+//Funciones motores (igual que tu código)
+void stopMotorA(){ digitalWrite(IN1, LOW); digitalWrite(IN2, LOW); analogWrite(ENA,0);}
+void motorA_forward(int PWM){ digitalWrite(IN1,HIGH); digitalWrite(IN2,LOW); analogWrite(ENA,PWM);}
+void motorA_backward(int PWM){ digitalWrite(IN1,LOW); digitalWrite(IN2,HIGH); analogWrite(ENA,PWM);}
 
-void PateadorON(int pwm){
-  pwm = constrain(pwm, 0, 255);
-  digitalWrite(IN9, LOW);
-  digitalWrite(IN10, HIGH);
-  analogWrite(ENE, pwm);}
+void stopMotorB(){ digitalWrite(IN3, LOW); digitalWrite(IN4, LOW); analogWrite(ENB,0);}
+void motorB_forward(int PWM){ digitalWrite(IN3,HIGH); digitalWrite(IN4,LOW); analogWrite(ENB,PWM);}
+void motorB_backward(int PWM){ digitalWrite(IN3,LOW); digitalWrite(IN4,HIGH); analogWrite(ENB,PWM);}
 
-void PateadorOff(){ 
-  digitalWrite(IN9, LOW);
-  digitalWrite(IN10, LOW);
-  analogWrite(ENE, 0);}
+void stopMotorC(){ digitalWrite(IN5, LOW); digitalWrite(IN6, LOW); analogWrite(ENC,0);}
+void motorC_forward(int PWM){ digitalWrite(IN5,HIGH); digitalWrite(IN6,LOW); analogWrite(ENC,PWM);}
+void motorC_backward(int PWM){ digitalWrite(IN5,LOW); digitalWrite(IN6,HIGH); analogWrite(ENC,PWM);}
 
-void CilindroOFF(){   
-  digitalWrite(IN7, LOW);
-  digitalWrite(IN8, LOW);
-  analogWrite(END, 0);}
-
-void CilindroON(int pwm){
-  pwm = constrain(pwm, 0, 255);   
-  digitalWrite(IN7, LOW);
-  digitalWrite(IN8, HIGH);
-  analogWrite(END, pwm);}
-  
-int mapPWM(float velocidad_angular, float max_rads){ //Definición de la función, requierimos la velocidad que queremos para la rueda y la máxima
-  float porcentaje = velocidad_angular / max_rads; //Calculamos qué porcentaje de la velocidad máxima estamos usando. porcentaje=ωmax/​ωactual​​
-  porcentaje = constrain(porcentaje, -1.0, 1.0); //Esto evita que el PWM sea mayor que 255.
-  int pwm = abs(porcentaje) * 255; //Convertir porcentaje a PWM
-  /*
-  if (pwm > 0 && pwm < 70)
-     pwm = 70;
-    */
-  return pwm;}
+int mapPWM(float w, float max_rads){
+  float p = constrain(w / max_rads, -1.0, 1.0);
+  return abs(p) * 255;
+}
