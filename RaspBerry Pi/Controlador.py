@@ -1,4 +1,3 @@
-import time
 
 # GANANCIAS PID LATERAL
 k_px = 0.7      # proporcional lateral
@@ -11,27 +10,17 @@ MAX_U = 7.0        # limita la velocidad de los motores
 deadband = 0.01    # zona donde el error horizontal se ignora
 MAX_INTEGRAL_X = 1.0  # evita el integral windup, limitando el valor acumulado
 
-AREA_OBJETIVO = 6000   # área deseada para detener avance
+AREA_OBJETIVO = 7000   # área deseada para detener avance
 ENTER_CONTROL = 22000  # si está demasiado cerca, detener Ux
 EXIT_CONTROL  = 20500 #margen para salir del control cercano
 
 error_x_prev = 0 #error lateral anterior, para la derivada.
 error_x_integral = 0 #error acumulado, para la integral.
 
-last_time = time.time() #tiempo anterior para calcular dt
 
+def perseguir(error_x, area, dt=0.05): #Función principal de seguimiento de la pelota
 
-def perseguir(error_x, area): #Función principal de seguimiento de la pelota
-
-    global error_x_prev, error_x_integral, last_time
-
-    # calcular dt real del sistema
-    now = time.time()
-    dt = now - last_time
-    last_time = now
-
-    if dt <= 0:
-        dt = 0.01
+    global error_x_prev, error_x_integral
 
     # Si no hay pelota detectada, se resetean variables PID y se envían comandos nulos.
     if error_x is None:
@@ -39,21 +28,12 @@ def perseguir(error_x, area): #Función principal de seguimiento de la pelota
         error_x_integral = 0
         return 0, 0, 0
 
-    # asignamos error_x a la variable error para trabajar con una copia local.
-    error = error_x
-
-    # Normalizamos el error para trabajar en rango [-1,1]
-    error = error_x / 320
-
-    # filtro simple para suavizar ruido de visión
-    error_filtrado = 0.7 * error_x_prev + 0.3 * error
-    error = error_filtrado
+    error = error_x #asignamos error_x a la variable error para trabajar con una copia local.
 
     if abs(error) < deadband: #Si el error es menor que la deadband, no se mueve lateralmente.
         Uy = 0
         error_x_integral = 0
     else:
-
         if error * error_x_prev < 0: #Verifica si el error cambió de signo
             error_x_integral = 0
 
@@ -72,12 +52,8 @@ def perseguir(error_x, area): #Función principal de seguimiento de la pelota
     Ux = k_pa * error_area #Control proporcional simple
     Ut = 0
 
-    error_area = AREA_OBJETIVO - area #Calcula la diferencia entre el área deseada y la real de la pelota.
-    Ux = k_pa * error_area #Control proporcional simple
-    Ut = 0
-
-    # evita que el robot se quede "tímido"
-    Ux = max(Ux, 2.0)
+    if area >= ENTER_CONTROL: #Detener pelota si esta demasiado cerca
+        Ux = 0
 
     # LIMITAR TODO A ±MAX_U
     Ux = max(min(Ux, MAX_U), -MAX_U)
