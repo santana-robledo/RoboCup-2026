@@ -169,6 +169,8 @@ def main():
             patada = 0
             cilindro = 0
             modo = get_strategy_mode()
+            if estado in [Estado.BUSQUEDA, Estado.PERSEGUIR]:
+                Controlador.reset()  # Resetear PID al cambiar de estado
 
             # Leer sensor de la pelota
             pelota_sensor,_ = Control.read()  # Devuelve 0, 1 o None
@@ -199,8 +201,9 @@ def main():
                     if not ball_confirmed:
                         estado = Estado.BUSQUEDA
                         continue
-                    Ux, Uy, Ut = Controlador.perseguir(error_para_control, area_filtered)
-                    Ux = max(Ux, 2.0)
+                        dt_real = 1.0 / fps if fps > 0 else 0.05
+                        Ux, Uy, Ut = Controlador.perseguir(error_para_control, area_filtered, dt=dt_real)
+                        Ux = max(Ux, 2.0)  # Velocidad mínima de avance
                     if cy is not None and cy > Y_ENTER_CONTROL:
                         estado = Estado.CONTROLAR
 
