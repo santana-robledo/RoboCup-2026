@@ -21,18 +21,24 @@ M,0.0,0.0,0.0,0,0,G
 
 unsigned long lastDebug = 0;
 
-// ================= ROBOT =================
+float evadeX = 0.0;
+float evadeY = 0.0;
+
+const int DISTANCIA_SEGURA = 120;
+
 float L = 0.09, R = 0.029;
 
 float Ux = 0.0;
 float Uy = 0.0;
 float Ut = 0.0;
 
+float Ux_cmd = 0.0;
+float Uy_cmd = 0.0;
+
 float v1 = 0.0;
 float v2 = 0.0;
 float v3 = 0.0;
 
-// ================= VELOCIDADES =================
 float vmax_A = (300 * 2 * PI / 60) * R;
 float vmax_B = (300 * 2 * PI / 60) * R;
 float vmax_C = (300 * 2 * PI / 60) * R;
@@ -41,21 +47,17 @@ float kv_A = 255.0 / vmax_A;
 float kv_B = 255.0 / vmax_B;
 float kv_C = 255.0 / vmax_C;
 
-// ================= PELOTA =================
 int estadoPelota = 0;
 int estadoPelotaPrev = -1;
 
-// ================= PATEADOR =================
 int patada = 0;
 int patada_prev = 0;
 
 unsigned long tiempoPatada = 0;
 bool pateando = false;
 
-// ================= CILINDRO =================
 int cilindro = 0;
 
-// ================= IMU =================
 MPU6050 mpu;
 BNO080 bno080;
 
@@ -69,7 +71,6 @@ float dt = 0.0;
 
 unsigned long lastTime = 0;
 
-// ================= PWM =================
 int pwm_a = 0;
 int pwm_b = 0;
 int pwm_c = 0;
@@ -78,19 +79,16 @@ float wa = 0.0;
 float wb = 0.0;
 float wc = 0.0;
 
-// ================= PID =================
 float Ut_pid = 0.0;
 
 float Kp = 3;
 float Ki = 1;
-float Kd = 0.0;
 
 float setpoint = 0.0;
 
 float error = 0.0;
 float error_int = 0.0;
 
-// ================= VL53 =================
 int dist1 = 0;
 int dist2 = 0;
 int dist3 = 0;
@@ -139,10 +137,6 @@ char modo = 'G';
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
 
-// ======================================================
-// ================= PCA9548A ===========================
-// ======================================================
-
 void tcaSelect(uint8_t i) {
 
   Wire.beginTransmission(TCAADDR);
@@ -152,10 +146,6 @@ void tcaSelect(uint8_t i) {
   delay(5);
 }
 
-// ======================================================
-// ===================== SETUP ==========================
-// ======================================================
-
 void setup() {
 
   Serial.begin(115200);
@@ -163,8 +153,6 @@ void setup() {
 
   Wire.begin(SDA_IMU, SCL_IMU);
   Wire.setClock(400000);
-
-  // ================= IMU =================
 
   if (usarBNO080) {
 
@@ -178,8 +166,6 @@ void setup() {
     }
 
     bno080.enableRotationVector(50);
-
-    // ===== ESPERAR DATOS VALIDOS =====
 
     delay(2000);
 
@@ -227,8 +213,6 @@ void setup() {
     Serial.println("MPU6050 listo");
   }
 
-  // ================= VL53 =================
-
   tcaSelect(1);
 
   if (!vl53_1.init()) {
@@ -265,8 +249,6 @@ void setup() {
   vl53_3.setTimeout(100);
   vl53_3.startContinuous();
 
-  // ================= PINES =================
-
   pinMode(SENSOR_PELOTA, INPUT);
 
   pinMode(IN1, OUTPUT);
@@ -295,8 +277,6 @@ void setup() {
   pinMode(SWITCH_2, INPUT);
   pinMode(SWITCH_3, INPUT);
 
-  // ================= PWM =================
-
   ledcAttach(ENA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENB, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENC, PWM_FREQ, PWM_RESOLUTION);
@@ -310,13 +290,10 @@ void setup() {
   Serial.println("Robot listo");
 }
 
-// ======================================================
-// ====================== LOOP ==========================
-// ======================================================
-
 void loop() {
 
-  // ================= SENSOR PELOTA =================
+  evadeX = 0.0;
+  evadeY = 0.0;
 
   estadoPelota = digitalRead(SENSOR_PELOTA);
 
@@ -327,8 +304,6 @@ void loop() {
 
     estadoPelotaPrev = estadoPelota;
   }
-
-  // ================= VL53 =================
 
   tcaSelect(1);
 
@@ -348,7 +323,6 @@ void loop() {
 
   if (vl53_3.timeoutOccurred()) dist3 = -1;
 
-  // ================= PATADA =================
 
   if (patada == 1 && patada_prev == 0 && !pateando) {
 
@@ -372,8 +346,6 @@ void loop() {
 
   patada_prev = patada;
 
-  // ================= TIEMPO =================
-
   unsigned long currentTime = micros();
 
   dt = (currentTime - lastTime) / 1000000.0;
@@ -381,8 +353,6 @@ void loop() {
   lastTime = currentTime;
 
   if (dt <= 0) dt = 0.0001;
-
-  // ================= IMU =================
 
   if (usarBNO080) {
 
@@ -410,8 +380,6 @@ void loop() {
     theta_f = atan2(sin(theta_f), cos(theta_f));
   }
 
-  // ================= PID =================
-
   error = setpoint - theta_f;
 
   error = atan2(sin(error), cos(error));
@@ -423,8 +391,6 @@ void loop() {
   Ut_pid = Kp * error + Ki * error_int;
 
   Ut_pid = constrain(Ut_pid, -4.0, 4.0);
-
-  // ================= SERIAL =================
 
   if (Serial.available() > 0) {
 
@@ -480,8 +446,6 @@ void loop() {
     Ut = constrain(Ut, -1.0, 1.0);
   }
 
-  // ================= CILINDRO =================
-
   if (!pateando) {
 
     if (cilindro == 1) {
@@ -496,34 +460,62 @@ void loop() {
     }
   }
 
-  // ================= CINEMATICA =================
+  // D2 = FRENTE -> ir hacia atras
+  if (dist2 > 30 && dist2 < DISTANCIA_SEGURA) {
+
+    float fuerza = (DISTANCIA_SEGURA - dist2) / (float)DISTANCIA_SEGURA;
+
+    evadeX -= fuerza;
+  }
+
+  // D1 = IZQUIERDA -> ir derecha
+  if (dist1 > 30 && dist1 < DISTANCIA_SEGURA) {
+
+    float fuerza = (DISTANCIA_SEGURA - dist1) / (float)DISTANCIA_SEGURA;
+
+    evadeY -= fuerza;
+  }
+
+  // D3 = DERECHA -> ir izquierda
+  if (dist3 > 30 && dist3 < DISTANCIA_SEGURA) {
+
+    float fuerza = (DISTANCIA_SEGURA - dist3) / (float)DISTANCIA_SEGURA;
+
+    evadeY += fuerza;
+  }
+
+  Ux_cmd = Ux + evadeX;
+  Uy_cmd = Uy + evadeY;
+
+  Ux_cmd = constrain(Ux_cmd, -1.0, 1.0);
+  Uy_cmd = constrain(Uy_cmd, -1.0, 1.0);
 
   if (modo == 'G') {
 
-    v1 = (sin(theta_f) * Ux)
-       - (cos(theta_f) * Uy)
+    v1 = (sin(theta_f) * Ux_cmd)
+       - (cos(theta_f) * Uy_cmd)
        + (L * Ut_pid);
 
-    v2 = (cos(theta_f + PI / 6) * Ux)
-       + (sin(theta_f + PI / 6) * Uy)
+    v2 = (cos(theta_f + PI / 6) * Ux_cmd)
+       + (sin(theta_f + PI / 6) * Uy_cmd)
        + (L * Ut_pid);
 
-    v3 = (-sin(theta_f + PI / 3) * Ux)
-       + (cos(theta_f + PI / 3) * Uy)
+    v3 = (-sin(theta_f + PI / 3) * Ux_cmd)
+       + (cos(theta_f + PI / 3) * Uy_cmd)
        + (L * Ut_pid);
   }
 
   else if (modo == 'L') {
 
-    v1 = (-Uy + (Ut));
+    v1 = (-Uy_cmd + Ut);
 
-    v2 = ((0.866 * Ux)
-       + (0.5 * Uy)
-       + (Ut));
+    v2 = ((0.866 * Ux_cmd)
+       + (0.5 * Uy_cmd)
+       + Ut);
 
-    v3 = ((-0.866 * Ux)
-       + (0.5 * Uy)
-       + (Ut));
+    v3 = ((-0.866 * Ux_cmd)
+       + (0.5 * Uy_cmd)
+       + Ut);
   }
 
   wa = v1 / R;
@@ -538,8 +530,6 @@ void loop() {
   pwm_b = mapPWM_linear(vb, kv_B);
   pwm_c = mapPWM_linear(vc, kv_C);
 
-  // ================= MOTORES =================
-
   (wa > 0) ? motorA_forward(pwm_a) :
   (wa < 0) ? motorA_backward(pwm_a) :
              stopMotorA();
@@ -552,8 +542,6 @@ void loop() {
   (wc < 0) ? motorC_backward(pwm_c) :
              stopMotorC();
 
-  // ================= DEBUG =================
-
   if (millis() - lastDebug >= 100) {
 
     lastDebug = millis();
@@ -561,10 +549,6 @@ void loop() {
     debugRobot();
   }
 }
-
-// ======================================================
-// ================== FUNCIONES MOTOR ===================
-// ======================================================
 
 void stopMotorA() {
 
@@ -637,11 +621,6 @@ void motorC_backward(int PWM) {
 
   ledcWrite(ENC, PWM);
 }
-
-// ======================================================
-// ==================== UTILIDADES ======================
-// ======================================================
-
 int mapPWM_linear(float v, float kv) {
 
   float pwm = kv * v;
@@ -653,14 +632,15 @@ int mapPWM_linear(float v, float kv) {
 
 void debugRobot() {
 
-  Serial.print("Ux: ");Serial.print(Ux, 3);
-  Serial.print(" | Uy: ");Serial.print(Uy, 3);
-  Serial.print(" | Ut: ");Serial.print(Ut, 3);
-  Serial.print(" | Ang: ");Serial.print(theta_f * 180.0 / PI, 2);
+  Serial.print("Ux: ");Serial.print(Ux_cmd, 2);
+  Serial.print(" | Uy: ");Serial.print(Uy_cmd, 2);
+  Serial.print(" | Ut: ");Serial.print(Ut, 2);
+  Serial.print(" | Ang: ");Serial.print(theta_f, 2);
   Serial.print(" | D1: ");Serial.print(dist1);
   Serial.print(" | D2: ");Serial.print(dist2);
   Serial.print(" | D3: ");Serial.print(dist3);
-  Serial.print(" | MODO: ");Serial.print(modo);
+  Serial.print(" | EvX: ");Serial.print(evadeX, 2);
+  Serial.print(" | EvY: ");Serial.print(evadeY, 2);
   Serial.print(" | PWM_A: ");Serial.print(pwm_a);
   Serial.print(" | PWM_B: ");Serial.print(pwm_b);
   Serial.print(" | PWM_C: ");Serial.println(pwm_c);
