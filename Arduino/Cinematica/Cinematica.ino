@@ -169,9 +169,30 @@ void tcaSelect(uint8_t i) {
 }
 
 void setup() {
-
   Serial.begin(115200);
   Serial.setTimeout(10);
+
+  pinMode(SW1, INPUT);
+  pinMode(SW2, INPUT);
+  pinMode(SW3, INPUT);
+  delay(50);
+
+  struct Config {
+  int sw1;
+  int sw2;
+  int sw3; };
+  Config config;
+
+  config.sw1 = digitalRead(SW1);
+  config.sw2 = digitalRead(SW2);
+  config.sw3 = digitalRead(SW3);
+
+  Serial.print("C,");
+  Serial.print(config.sw1);
+  Serial.print(",");
+  Serial.print(config.sw2);
+  Serial.print(",");
+  Serial.println(config.sw3);
 
   Wire.begin(SDA_IMU, SCL_IMU);
   Wire.setClock(400000);
@@ -304,10 +325,6 @@ void setup() {
 
   digitalWrite(MUX_EN, LOW);
 
-  pinMode(SW1, INPUT);
-  pinMode(SW2, INPUT);
-  pinMode(SW3, INPUT);
-
   ledcAttach(ENA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENB, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENC, PWM_FREQ, PWM_RESOLUTION);
@@ -322,10 +339,6 @@ void setup() {
 }
 
 void loop() {
-
-  sw1 = digitalRead(SW1);
-  sw2 = digitalRead(SW2);
-  sw3 = digitalRead(SW3);
 
   evadeX = 0.0;
   evadeY = 0.0;
