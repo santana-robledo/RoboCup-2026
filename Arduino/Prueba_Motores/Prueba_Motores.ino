@@ -7,7 +7,8 @@ VL53L0X vl53_1;
 VL53L0X vl53_2;
 VL53L0X vl53_3;
 
-bool usarBNO080 = true;
+bool usarBNO080 = false;
+bool usarDistancia= false;
 
 BNO080 bno080;
 MPU6050 mpu;
@@ -138,9 +139,14 @@ void setup() {
     }
 
     lastTime = millis();
-
     Serial.println("MPU6050 listo");
   }
+
+  // ================= VL53 #1 =================
+
+// ================= VL53 =================
+
+if (usarDistancia) {
 
   // ================= VL53 #1 =================
 
@@ -189,6 +195,7 @@ void setup() {
   vl53_3.startContinuous();
 
   Serial.println("VL53 #3 listo");
+}
 
   // ================= PINES =================
 
@@ -363,34 +370,63 @@ void loop() {
       }
     }
 
+    else{
+      int16_t gx, gy, gz;
+
+      mpu.getRotation(&gx, &gy, &gz);
+
+      unsigned long currentTime = micros();
+
+      float dt = (currentTime - lastTime) / 1000000.0;
+
+      lastTime = currentTime;
+
+      float wz = (gz / 131.0) * PI / 180.0;
+
+      yaw += wz * dt;
+
+      yaw = atan2(sin(yaw), cos(yaw));
+    }
+
     // ===== VL53 =====
 
-    tcaSelect(1);
+int dist1 = -1;
+int dist2 = -1;
+int dist3 = -1;
 
-    int dist1 = vl53_1.readRangeContinuousMillimeters();
+if (usarDistancia) {
 
-    if (vl53_1.timeoutOccurred())
-      dist1 = -1;
+  tcaSelect(1);
 
-    tcaSelect(2);
+  dist1 = vl53_1.readRangeContinuousMillimeters();
 
-    int dist2 = vl53_2.readRangeContinuousMillimeters();
+  if (vl53_1.timeoutOccurred())
+    dist1 = -1;
 
-    if (vl53_2.timeoutOccurred())
-      dist2 = -1;
+  tcaSelect(2);
 
-    tcaSelect(3);
+  dist2 = vl53_2.readRangeContinuousMillimeters();
 
-    int dist3 = vl53_3.readRangeContinuousMillimeters();
+  if (vl53_2.timeoutOccurred())
+    dist2 = -1;
 
-    if (vl53_3.timeoutOccurred())
-      dist3 = -1;
+  tcaSelect(3);
+
+  dist3 = vl53_3.readRangeContinuousMillimeters();
+
+  if (vl53_3.timeoutOccurred())
+    dist3 = -1;
+}
 
     // ===== MUX =====
 
     int s1 = leerMux(0);
     int s2 = leerMux(1);
     int s3 = leerMux(2);
+
+    int sw1 = digitalRead(SW1);
+    int sw2 = digitalRead(SW2);
+    int sw3 = digitalRead(SW3);
 
     // ===== PRINT =====
 
@@ -413,7 +449,16 @@ void loop() {
     Serial.print(s2);
 
     Serial.print(" | S3: ");
-    Serial.println(s3);
+    Serial.print(s3);
+
+    Serial.print(" | SW1: ");
+    Serial.print(sw1);
+
+    Serial.print(" | SW2: ");
+    Serial.print(sw2);
+
+    Serial.print(" | SW3: ");
+    Serial.println(sw3);
   }
 }
 
