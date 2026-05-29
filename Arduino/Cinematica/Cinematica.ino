@@ -4,20 +4,20 @@
 #include <SparkFun_BNO080_Arduino_Library.h>
 #include <VL53L0X.h>
 
-bool usarBNO080 = true;
-
-#define TCAADDR 0x70
-
-VL53L0X vl53_1;
-VL53L0X vl53_2;
-VL53L0X vl53_3;
-
 /* 
 Forma de enviar los datos
 M,0.0,0.0,0.0,0,0,G
    X   Y   t  P C modo
      G=global, L=Local
 */
+
+bool usarBNO080 = false;
+
+#define TCAADDR 0x70
+
+VL53L0X vl53_1;
+VL53L0X vl53_2;
+VL53L0X vl53_3;
 
 unsigned long lastDebug = 0;
 
@@ -58,14 +58,32 @@ bool pateando = false;
 
 int cilindro = 0;
 
+// ================= IMU =================
+
 MPU6050 mpu;
 BNO080 bno080;
 
 float theta_f = 0.0;
 float theta_offset = 0.0;
 
-float wz = 0.0;
+// Gyro
+float gx_dps = 0.0;
+float gy_dps = 0.0;
+float gz_dps = 0.0;
+
+float gx_rad = 0.0;
+float gy_rad = 0.0;
+float gz_rad = 0.0;
+
+// Bias
+float bias_x = 0.0;
+float bias_y = 0.0;
 float bias_z = 0.0;
+
+// Angulos
+float roll = 0.0;
+float pitch = 0.0;
+float yaw = 0.0;
 
 float dt = 0.0;
 
@@ -95,6 +113,10 @@ int dist3 = 0;
 
 char modo = 'G';
 
+int sw1=0;
+int sw2=0;
+int sw3=0;
+
 // ===== MOTOR A =====
 #define ENA   14
 #define IN1   15
@@ -114,6 +136,11 @@ char modo = 'G';
 #define IN7   19
 #define IN8   23
 
+// ================= SWITCHES =================
+#define SW1 39
+#define SW2 32
+#define SW3 35
+
 // ===== SENSOR PELOTA =====
 #define SENSOR_PELOTA 33
 
@@ -123,11 +150,6 @@ char modo = 'G';
 #define MUX_S1 27
 #define MUX_S2 26
 #define MUX_EN 25
-
-// ===== SWITCHES =====
-#define SWITCH_1 39
-#define SWITCH_2 32
-#define SWITCH_3 35
 
 // ===== I2C =====
 #define SDA_IMU 21
@@ -156,11 +178,11 @@ void setup() {
 
   if (usarBNO080) {
 
-    Serial.println("Iniciando BNO080...");
+    //Serial.println("Iniciando BNO080...");
 
     if (!bno080.begin()) {
 
-      Serial.println("BNO080 no detectado");
+      //Serial.println("BNO080 no detectado");
 
       while (1);
     }
@@ -176,41 +198,50 @@ void setup() {
 
     theta_offset = bno080.getYaw();
 
-    Serial.print("Offset inicial: ");
-    Serial.println(theta_offset * 180.0 / PI);
+    //Serial.print("Offset inicial: ");
+    //Serial.println(theta_offset * 180.0 / PI);
 
-    Serial.println("BNO080 listo");
+    //Serial.println("BNO080 listo");
   }
 
   else {
 
-    Serial.println("Iniciando MPU6050...");
+    //Serial.println("Iniciando MPU6050...");
 
     mpu.initialize();
 
     if (!mpu.testConnection()) {
 
-      Serial.println("Error MPU6050");
+      //Serial.println("Error MPU6050");
 
       while (1);
     }
 
-    long sum = 0;
+    //Serial.println("Calibrando gyro...");
 
-    for (int i = 0; i < 2000; i++) {
+    long sumX = 0;
+    long sumY = 0;
+    long sumZ = 0;
+
+    for (int i = 0; i < 3000; i++) {
 
       int16_t gx, gy, gz;
 
       mpu.getRotation(&gx, &gy, &gz);
 
-      sum += gz;
+      sumX += gx;
+      sumY += gy;
+      sumZ += gz;
 
       delay(2);
     }
 
-    bias_z = sum / 2000.0;
+    bias_x = sumX / 3000.0;
+    bias_y = sumY / 3000.0;
+    bias_z = sumZ / 3000.0;
+    lastTime = micros();
 
-    Serial.println("MPU6050 listo");
+    //Serial.println("MPU6050 listo");
   }
 
   tcaSelect(1);
@@ -273,9 +304,9 @@ void setup() {
 
   digitalWrite(MUX_EN, LOW);
 
-  pinMode(SWITCH_1, INPUT);
-  pinMode(SWITCH_2, INPUT);
-  pinMode(SWITCH_3, INPUT);
+  pinMode(SW1, INPUT);
+  pinMode(SW2, INPUT);
+  pinMode(SW3, INPUT);
 
   ledcAttach(ENA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENB, PWM_FREQ, PWM_RESOLUTION);
@@ -291,6 +322,10 @@ void setup() {
 }
 
 void loop() {
+
+  sw1 = digitalRead(SW1);
+  sw2 = digitalRead(SW2);
+  sw3 = digitalRead(SW3);
 
   evadeX = 0.0;
   evadeY = 0.0;
@@ -322,7 +357,6 @@ void loop() {
   dist3 = vl53_3.readRangeContinuousMillimeters();
 
   if (vl53_3.timeoutOccurred()) dist3 = -1;
-
 
   if (patada == 1 && patada_prev == 0 && !pateando) {
 
@@ -364,20 +398,48 @@ void loop() {
         sin(yaw_raw - theta_offset),
         cos(yaw_raw - theta_offset)
       );
+
+      yaw = theta_f;
     }
   }
 
   else {
 
+    int16_t ax, ay, az;
     int16_t gx, gy, gz;
 
-    mpu.getRotation(&gx, &gy, &gz);
+    mpu.getMotion6(
+      &ax, &ay, &az,
+      &gx, &gy, &gz
+    );
 
-    wz = ((gz - bias_z) / 131.0) * PI / 180.0;
+    gx_dps = (gx - bias_x) / 131.0;
+    gy_dps = (gy - bias_y) / 131.0;
+    gz_dps = (gz - bias_z) / 131.0;
 
-    theta_f += wz * dt;
+    gx_rad = gx_dps * PI / 180.0;
+    gy_rad = gy_dps * PI / 180.0;
+    gz_rad = gz_dps * PI / 180.0;
 
-    theta_f = atan2(sin(theta_f), cos(theta_f));
+    float accel_roll =
+      atan2(ay, az);
+
+    float accel_pitch =
+      atan2(-ax, sqrt(ay * ay + az * az));
+
+    roll =
+      0.98 * (roll + gx_rad * dt) +
+      0.02 * accel_roll;
+
+    pitch =
+      0.98 * (pitch + gy_rad * dt) +
+      0.02 * accel_pitch;
+
+    yaw += gz_rad * dt;
+
+    yaw = atan2(sin(yaw), cos(yaw));
+
+    theta_f = yaw;
   }
 
   error = setpoint - theta_f;
@@ -621,6 +683,7 @@ void motorC_backward(int PWM) {
 
   ledcWrite(ENC, PWM);
 }
+
 int mapPWM_linear(float v, float kv) {
 
   float pwm = kv * v;
@@ -635,13 +698,14 @@ void debugRobot() {
   Serial.print("Ux: ");Serial.print(Ux_cmd, 2);
   Serial.print(" | Uy: ");Serial.print(Uy_cmd, 2);
   Serial.print(" | Ut: ");Serial.print(Ut, 2);
-  Serial.print(" | Ang: ");Serial.print(theta_f, 2);
+  Serial.print(" | Yaw: ");Serial.print(yaw, 2);
   Serial.print(" | D1: ");Serial.print(dist1);
   Serial.print(" | D2: ");Serial.print(dist2);
   Serial.print(" | D3: ");Serial.print(dist3);
-  Serial.print(" | EvX: ");Serial.print(evadeX, 2);
-  Serial.print(" | EvY: ");Serial.print(evadeY, 2);
   Serial.print(" | PWM_A: ");Serial.print(pwm_a);
   Serial.print(" | PWM_B: ");Serial.print(pwm_b);
-  Serial.print(" | PWM_C: ");Serial.println(pwm_c);
+  Serial.print(" | PWM_C: ");Serial.print(pwm_c);
+  Serial.print(" | SW1: "); Serial.print(sw1);
+Serial.print(" | SW2: "); Serial.print(sw2);
+Serial.print(" | SW3: "); Serial.println(sw3);
 }
