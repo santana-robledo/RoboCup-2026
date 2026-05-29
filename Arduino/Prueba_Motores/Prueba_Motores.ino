@@ -1,7 +1,16 @@
 #include <Wire.h>
 #include <SparkFun_BNO080_Arduino_Library.h>
+#include <MPU6050.h>
+#include <VL53L0X.h>
+
+VL53L0X vl53_1;
+VL53L0X vl53_2;
+VL53L0X vl53_3;
+
+bool usarBNO080 = true;
 
 BNO080 bno080;
+MPU6050 mpu;
 
 bool modoDebug = false;
 
@@ -9,134 +18,210 @@ float yaw = 0;
 
 String comando = "";
 
-//////////////// BNO080 //////////////////
+unsigned long lastTime = 0;
+unsigned long lastDebug = 0;
+
+#define TCAADDR 0x70
 
 #define SDA_BNO 21
 #define SCL_BNO 22
 
-////////////// PUENTE H 1 //////////////
-
-// ===== MOTOR A =====
+// ================= MOTORES =================
 #define ENA 14
 #define IN1 13
 #define IN2 15
 
-// ===== MOTOR B =====
 #define ENB 16
 #define IN3 4
 #define IN4 2
 
-////////////// PUENTE H 2 //////////////
-
-// ===== MOTOR C =====
 #define ENC 18
 #define IN5 5
 #define IN6 17
 
-// ===== CILINDRO =====
+// ================= PATEADOR =================
 #define IN7 19
 #define IN8 23
 
-////////////// SENSOR PELOTA //////////////
-
+// ================= SENSORES =================
 #define PELOTA 33
 
-////////////// MULTIPLEXOR //////////////
-
-// SIG
+// ================= MUX =================
 #define SIG_MUX 34
-
-// SELECT
 #define S0 12
 #define S1 27
 #define S2 26
+#define S3 25
 
-// ENABLE
-#define MUX_EN 25
-
-////////////// SWITCHES //////////////
-
+// ================= SWITCHES =================
 #define SW1 39
 #define SW2 32
 #define SW3 35
 
-////////////// PWM ESP32 //////////////
-
+// ================= PWM =================
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
 
-//////////////////////////////////////////////////////////
+// =====================================================
+
+void seleccionarCanal(int canal) {
+
+  digitalWrite(S0, canal & 0x01);
+  digitalWrite(S1, (canal >> 1) & 0x01);
+  digitalWrite(S2, (canal >> 2) & 0x01);
+  digitalWrite(S3, (canal >> 3) & 0x01);
+}
+
+// =====================================================
+
+void tcaSelect(uint8_t i) {
+
+  Wire.beginTransmission(TCAADDR);
+  Wire.write(1 << i);
+  Wire.endTransmission();
+}
+
+// =====================================================
+
+int leerMux(int canal) {
+
+  seleccionarCanal(canal);
+
+  delayMicroseconds(100);
+
+  int v1 = analogRead(SIG_MUX);
+  int v2 = analogRead(SIG_MUX);
+
+  return (v1 + v2) / 2;
+}
+
+// ===================== SETUP =====================
 
 void setup() {
 
   Serial.begin(115200);
 
-  ////////////////// I2C //////////////////
-
   Wire.begin(SDA_BNO, SCL_BNO);
+  Wire.setClock(400000);
 
   delay(100);
 
-  ////////////////// BNO080 //////////////////
+  // ================= IMU =================
 
-  Serial.println("Iniciando BNO080...");
+  if (usarBNO080) {
 
-  if (!bno080.begin()) {
+    Serial.println("Iniciando BNO080...");
 
-    Serial.println("BNO080 no detectado");
+    if (!bno080.begin()) {
+
+      Serial.println("BNO080 no detectado");
+
+      while (1);
+    }
+
+    bno080.enableRotationVector(50);
+
+    Serial.println("BNO080 listo");
+  }
+
+  else {
+
+    Serial.println("Iniciando MPU6050...");
+
+    mpu.initialize();
+
+    if (!mpu.testConnection()) {
+
+      Serial.println("MPU6050 no detectado");
+
+      while (1);
+    }
+
+    lastTime = millis();
+
+    Serial.println("MPU6050 listo");
+  }
+
+  // ================= VL53 #1 =================
+
+  tcaSelect(1);
+
+  if (!vl53_1.init()) {
+
+    Serial.println("VL53 #1 no detectado");
 
     while (1);
   }
 
-  // Rotation Vector
-  bno080.enableRotationVector(50);
+  vl53_1.setTimeout(50);
+  vl53_1.startContinuous();
 
-  Serial.println("BNO080 listo");
+  Serial.println("VL53 #1 listo");
 
-  ////////////////// PINES //////////////////
+  // ================= VL53 #2 =================
 
-  // MOTOR A
+  tcaSelect(2);
+
+  if (!vl53_2.init()) {
+
+    Serial.println("VL53 #2 no detectado");
+
+    while (1);
+  }
+
+  vl53_2.setTimeout(50);
+  vl53_2.startContinuous();
+
+  Serial.println("VL53 #2 listo");
+
+  // ================= VL53 #3 =================
+
+  tcaSelect(3);
+
+  if (!vl53_3.init()) {
+
+    Serial.println("VL53 #3 no detectado");
+
+    while (1);
+  }
+
+  vl53_3.setTimeout(50);
+  vl53_3.startContinuous();
+
+  Serial.println("VL53 #3 listo");
+
+  // ================= PINES =================
+
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
 
-  // MOTOR B
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  // MOTOR C
   pinMode(IN5, OUTPUT);
   pinMode(IN6, OUTPUT);
 
-  // CILINDRO
   pinMode(IN7, OUTPUT);
   pinMode(IN8, OUTPUT);
 
-  // PELOTA
   pinMode(PELOTA, INPUT);
 
-  // MULTIPLEXOR
   pinMode(S0, OUTPUT);
   pinMode(S1, OUTPUT);
   pinMode(S2, OUTPUT);
+  pinMode(S3, OUTPUT);
 
   pinMode(SIG_MUX, INPUT);
 
-  pinMode(MUX_EN, OUTPUT);
-
-  digitalWrite(MUX_EN, LOW);
-
-  // SWITCHES
   pinMode(SW1, INPUT);
   pinMode(SW2, INPUT);
   pinMode(SW3, INPUT);
 
-  ////////////////// PWM //////////////////
+  // ================= PWM =================
 
   ledcAttach(ENA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENB, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENC, PWM_FREQ, PWM_RESOLUTION);
-
-  ////////////////// ESTADO INICIAL //////////////////
 
   stopMotorA();
   stopMotorB();
@@ -146,21 +231,25 @@ void setup() {
   Serial.println("Listo");
 }
 
-//////////////////////////////////////////////////////////
+// ===================== LOOP =====================
 
 void loop() {
+
+  // ================= SERIAL =================
 
   while (Serial.available()) {
 
     char c = Serial.read();
 
-    if (c == '\n') {
+    if (c == '\n' || c == '\r') {
 
       comando.trim();
 
-      if (comando.length() == 0)
-        return;
+      if (comando.length() == 0) {
 
+        comando = "";
+        break;
+      }
       Serial.println(comando);
 
       char motor = comando.charAt(0);
@@ -169,14 +258,10 @@ void loop() {
 
       if (comando.length() > 1) {
 
-        pwm = comando.substring(1).toInt();
-
-        pwm = constrain(pwm, -255, 255);
+        pwm = constrain(comando.substring(1).toInt(), -255, 255);
       }
 
       switch (motor) {
-
-        ////////////////// MOTOR A //////////////////
 
         case 'A':
 
@@ -191,8 +276,6 @@ void loop() {
 
           break;
 
-        ////////////////// MOTOR B //////////////////
-
         case 'B':
 
           if (pwm > 0)
@@ -205,8 +288,6 @@ void loop() {
             stopMotorB();
 
           break;
-
-        ////////////////// MOTOR C //////////////////
 
         case 'C':
 
@@ -221,48 +302,21 @@ void loop() {
 
           break;
 
-        ////////////////// MOTOR D //////////////////
-
         case 'D':
 
-          // D200  -> cilindro
-          if (pwm > 100) {
-
+          if (pwm > 100)
             cilindro_on();
-          }
 
-          // D-200 -> pateador
-          else if (pwm < -100) {
-
+          else if (pwm < -100)
             pateador_on();
-          }
 
-          // D50 -> ambos
-          else if (pwm > 0 && pwm <= 100) {
-
+          else if (pwm > 0)
             ambos_on();
-          }
 
-          // D0 -> apagar
-          else {
-
+          else
             stopMotorD();
-          }
 
           break;
-
-        ////////////////// STOP //////////////////
-
-        case 'S':
-
-          stopMotorA();
-          stopMotorB();
-          stopMotorC();
-          stopMotorD();
-
-          break;
-
-        ////////////////// DEBUG //////////////////
 
         case 'E':
 
@@ -274,9 +328,7 @@ void loop() {
           modoDebug = false;
           break;
 
-        ////////////////// DEFAULT //////////////////
-
-        default:
+        case 'S':
 
           stopMotorA();
           stopMotorB();
@@ -295,64 +347,64 @@ void loop() {
     }
   }
 
-  ////////////////// DEBUG //////////////////
+  // ================= DEBUG =================
 
-  if (modoDebug) {
-    int pelota = digitalRead(PELOTA);
-    int sw1 = digitalRead(SW1);
-    int sw2 = digitalRead(SW2);
-    int sw3 = digitalRead(SW3);
+  if (modoDebug && millis() - lastDebug >= 50) {
 
-    ////////////////// BNO080 //////////////////
+    lastDebug = millis();
 
-    if (bno080.dataAvailable()) {
+    // ===== YAW =====
 
-      yaw = bno080.getYaw() * 180.0 / PI;
+    if (usarBNO080) {
+
+      if (bno080.dataAvailable()) {
+
+        yaw = bno080.getYaw() * 180.0 / PI;
+      }
     }
 
-    int s1, s2, s3, s4, s5;
+    // ===== VL53 =====
 
-    // SENSOR 1
-    seleccionarCanal(0);
-    delayMicroseconds(20);
-    s1 = analogRead(SIG_MUX);
+    tcaSelect(1);
 
-    // SENSOR 2
-    seleccionarCanal(1);
-    delayMicroseconds(20);
-    s2 = analogRead(SIG_MUX);
+    int dist1 = vl53_1.readRangeContinuousMillimeters();
 
-    // SENSOR 3
-    seleccionarCanal(2);
-    delayMicroseconds(20);
-    s3 = analogRead(SIG_MUX);
+    if (vl53_1.timeoutOccurred())
+      dist1 = -1;
 
-    // SENSOR 4
-    seleccionarCanal(3);
-    delayMicroseconds(20);
-    s4 = analogRead(SIG_MUX);
+    tcaSelect(2);
 
-    // SENSOR 5
-    seleccionarCanal(4);
-    delayMicroseconds(20);
-    s5 = analogRead(SIG_MUX);
+    int dist2 = vl53_2.readRangeContinuousMillimeters();
 
-    ////////////////// IMPRESION //////////////////
+    if (vl53_2.timeoutOccurred())
+      dist2 = -1;
+
+    tcaSelect(3);
+
+    int dist3 = vl53_3.readRangeContinuousMillimeters();
+
+    if (vl53_3.timeoutOccurred())
+      dist3 = -1;
+
+    // ===== MUX =====
+
+    int s1 = leerMux(0);
+    int s2 = leerMux(1);
+    int s3 = leerMux(2);
+
+    // ===== PRINT =====
 
     Serial.print("Yaw: ");
     Serial.print(yaw);
 
-    Serial.print(" | Pelota: ");
-    Serial.print(pelota);
+    Serial.print(" | D1: ");
+    Serial.print(dist1);
 
-    Serial.print(" | SW1: ");
-    Serial.print(sw1);
+    Serial.print(" | D2: ");
+    Serial.print(dist2);
 
-    Serial.print(" | SW2: ");
-    Serial.print(sw2);
-
-    Serial.print(" | SW3: ");
-    Serial.print(sw3);
+    Serial.print(" | D3: ");
+    Serial.print(dist3);
 
     Serial.print(" | S1: ");
     Serial.print(s1);
@@ -361,33 +413,18 @@ void loop() {
     Serial.print(s2);
 
     Serial.print(" | S3: ");
-    Serial.print(s3);
-
-    Serial.print(" | S4: ");
-    Serial.print(s4);
-
-    Serial.print(" | S5: ");
-    Serial.println(s5);
-
-    delay(100);
+    Serial.println(s3);
   }
 }
 
-void seleccionarCanal(int canal) {
-
-  digitalWrite(S0, canal & 0x01);
-  digitalWrite(S1, (canal >> 1) & 0x01);
-  digitalWrite(S2, (canal >> 2) & 0x01);
-}
-
-//////////////// STOP //////////////////
+// ===================== FUNCIONES =====================
 
 void stopMotorA() {
 
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
 
-  analogWrite(ENA, 0);
+  ledcWrite(ENA, 0);
 }
 
 void stopMotorB() {
@@ -395,7 +432,7 @@ void stopMotorB() {
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
 
-  analogWrite(ENB, 0);
+  ledcWrite(ENB, 0);
 }
 
 void stopMotorC() {
@@ -403,69 +440,61 @@ void stopMotorC() {
   digitalWrite(IN5, LOW);
   digitalWrite(IN6, LOW);
 
-  analogWrite(ENC, 0);
+  ledcWrite(ENC, 0);
 }
-
-//////////////// MOTOR A //////////////////
-
-void motorA_forward(int PWM) {
-
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-
-  analogWrite(ENA, PWM);
-}
-
-void motorA_backward(int PWM) {
-
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-
-  analogWrite(ENA, PWM);
-}
-
-//////////////// MOTOR B //////////////////
-
-void motorB_forward(int PWM) {
-
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-
-  analogWrite(ENB, PWM);
-}
-
-void motorB_backward(int PWM) {
-
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-
-  analogWrite(ENB, PWM);
-}
-
-//////////////// MOTOR C //////////////////
-
-void motorC_forward(int PWM) {
-
-  digitalWrite(IN5, HIGH);
-  digitalWrite(IN6, LOW);
-
-  analogWrite(ENC, PWM);
-}
-
-void motorC_backward(int PWM) {
-
-  digitalWrite(IN5, LOW);
-  digitalWrite(IN6, HIGH);
-
-  analogWrite(ENC, PWM);
-}
-
-//////////////// MOTOR D //////////////////
 
 void stopMotorD() {
 
   digitalWrite(IN7, LOW);
   digitalWrite(IN8, LOW);
+}
+
+void motorA_forward(int p) {
+
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  ledcWrite(ENA, p);
+}
+
+void motorA_backward(int p) {
+
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  ledcWrite(ENA, p);
+}
+
+void motorB_forward(int p) {
+
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  ledcWrite(ENB, p);
+}
+
+void motorB_backward(int p) {
+
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  ledcWrite(ENB, p);
+}
+
+void motorC_forward(int p) {
+
+  digitalWrite(IN5, HIGH);
+  digitalWrite(IN6, LOW);
+
+  ledcWrite(ENC, p);
+}
+
+void motorC_backward(int p) {
+
+  digitalWrite(IN5, LOW);
+  digitalWrite(IN6, HIGH);
+
+  ledcWrite(ENC, p);
 }
 
 void cilindro_on() {
