@@ -1,0 +1,46 @@
+pwma 33
+ina1 12
+ina2 32
+pwmb 26
+inb1 27
+inb2 14
+
+
+pwma 15
+ina1 25
+ina2 13
+pwmb puenteado5v
+inb1 18
+inb2 19
+
+4 lectura sensor digital
+16,5,2,23,34 multiplexor
+
+22 - INPUTSCL
+21 - INPUTSDA
+
+Switches 17,35,39
+
+////////////////// Placa 2 //////////////
+
+pwma 16
+ina1 4
+ina2 2
+pwmb 14
+inb1 13
+inb2 15
+
+pwma 18
+ina1 19
+ina2 23
+pwmb puenteado5v
+inb1 17
+inb2 5
+
+33 lectura sensor digital
+34,12,27,26,25 multiplexor
+
+22 - INPUTSCL
+21 - INPUTSDA
+
+Switches 39,32,35
