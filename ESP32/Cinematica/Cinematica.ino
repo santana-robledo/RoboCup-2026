@@ -17,8 +17,30 @@ MAC_A: D8:13:2A:7D:92:80
 MAC_B: B8:D6:1A:6B:29:C4
 */
 
-////////////// Conexión ESP32 /////////////////
+///////////////////////// Banderas de configuración ////////////
+
+bool usarBNO080 = true;
+bool serPortero = false;
+bool usarPiso = true;
+bool usarDistancia = false;
+bool porteriaAzul = true;
 char ROBOT_ID = 'A';
+
+////////////////////////////// Maquina de Estados ////////////////
+
+enum EstadoRobot {
+  JUGAR,
+  CONFIG,
+  LINEA,
+  EVADIR,
+  DETENER,
+};
+
+EstadoRobot estadoActual = JUGAR;
+EstadoRobot estadoAnterior = JUGAR;
+
+////////////// Conexión ESP32 /////////////////
+
 uint8_t robotB_mac[] = {0xD8, 0x13, 0x2A, 0x7D, 0x92, 0x80};
 uint8_t robotA_mac[] = {0xB8, 0xD6, 0x1A, 0x6B, 0x29, 0xC4};
 uint8_t* peerAddress;
@@ -26,35 +48,31 @@ bool usarComunicacion = true;
 
 ////////////////////////////////////////////////
 
-bool usarBNO080 = false;
-bool serPortero = false;
 const int DISTANCIA_PORTERO = 150;
 const int UMBRAL_LINEA = 2000;
 
-//////////Sensores de distancia
-
-
+////////// Sensores de distancia
 #define MUX1 0x70
 #define MUX2 0x74
-
 #define NUM_SENSORES 11
 
 VL53L0X sensores[NUM_SENSORES];
 
 int dist[NUM_SENSORES];
 const int distanciaSegura[NUM_SENSORES] = {
-  60,  // S1
-  30,  // S2
-  50,  // S3
-  50,  // S4
-  50,  // S5
-  30, // S6
-  30, // S7
-  90, // S8
-  100, // S9
-  100, // S10
-  60   // S11
+  60,   // S1
+  30,   // S2
+  50,   // S3
+  50,   // S4
+  50,   // S5
+  30,   // S6
+  30,   // S7
+  90,   // S8
+  100,  // S9
+  100,  // S10
+  60    // S11
 };
+
 const uint8_t muxSensor[NUM_SENSORES] = {
   MUX1, MUX1, MUX1, MUX1, MUX1,
   MUX2, MUX2, MUX2, MUX2, MUX2, MUX2
@@ -66,85 +84,41 @@ const uint8_t canalSensor[NUM_SENSORES] = {
 };
 
 const float FUERZA_EVASION = 0.3;
-const float repelX[NUM_SENSORES] = {
-
-  -1.0,  // S1
-  -0.7,  // S2
-   0.0,  // S3
-   0.7,  // S4
-   1.0,  // S5
-   1.0,  // S6
-   0.7,  // S7
-   0.0,  // S8
-  -0.7,  // S9
-  -1.0,   // S10
-  -0.5  //S11
-};
-
-const float repelY[NUM_SENSORES] = {
-
-   0.3,  // S1
-   0.7,  // S2
-   1.0,  // S3
-   0.7,  // S4
-   0.3,  // S5
-  -0.3,  // S6
-  -0.7,  // S7
-  -1.0,  // S8
-  -0.7,  // S9
-  -0.3,   // S10
-  -1.0   // S11
-};
 
 ///// Sensores de piso
 float pisoFiltrado[12];
-const float ALPHA_PISO = 0.3;
-int umbral_parada=1200;
+const float ALPHA_PISO = 0.6;
+int umbral_parada = 2000;
+
 const int umbral[12] = {
-  800, // L0
-  800, // L1
-  800, // L2
-  800, // L3
-  800, // L4
-  800, // L5
-  800, // L6
-  800, // L7
-  800, // L8
-  800, // L9
-  800, // L10
-  800  // L11
+  900,   // L0
+  200,   // L1
+  1450,  // L2
+  1250,  // L3
+  500,   // L4
+  620,   // L5
+  380,   // L6
+  700,   // L7
+  500,   // L8
+  950,   // L9
+  350,   // L10
+  200    // L11
 };
 
-float pisoX[12] = {
+bool parLinea[6];
+int paresLineaActivos = 0;
+int sensoresLineaActivos = 0;
 
-  -0.5,  // S1
-  -0.5, // S2
-   0.0, // S3
-   0.0,  // S4
-   1.0, // S5
-   1.0, // S6
-   0.0,  // S7
-   0.0, // S8
-   -0.5, // S9
-   -0.5,  // S10
-  -1.0, // S11
-  -1.0  // S12
+float pisoX[12] = {
+  -0.5, -0.5,  0.0,  0.0,
+   1.0,  1.0,  0.0,  0.0,
+  -0.5, -0.5, -1.0, -1.0
 };
 
 float pisoY[12] = {
-
-  -0.50,   // S1
-  -0.50,  // S2
-   1.0,  // S3
-   1.0,   // S4
-   0.0,  // S5
-   0.0,  // S6
-   -1.0,   // S7
-   -1.0,  // S8
-   0.5,  // S9
-   0.50,   // S10
-   0.0,  // S11
-   0.0   // S12
+  -0.5, -0.5,  1.0,  1.0,
+   0.0,  0.0, -1.0, -1.0,
+   0.5,  0.5,  0.0,  0.0
 };
 
 unsigned long lastDebug = 0;
@@ -210,13 +184,12 @@ float bias_x = 0.0;
 float bias_y = 0.0;
 float bias_z = 0.0;
 
-// Angulos
+// Ángulos
 float roll = 0.0;
 float pitch = 0.0;
 float yaw = 0.0;
 
 float dt = 0.0;
-
 unsigned long lastTime = 0;
 
 int pwm_a = 0;
@@ -239,28 +212,28 @@ float error_int = 0.0;
 
 char modo = 'G';
 
-int sw1=0;
-int sw2=0;
-int sw3=0;
+int sw1 = 0;
+int sw2 = 0;
+int sw3 = 0;
 
 // ===== MOTOR A =====
-#define IN1   15
-#define IN2   13
-#define ENA   14
+#define IN1   5
+#define IN2   17
+#define ENA   18
 
 // ===== MOTOR B =====
-#define IN3   2
-#define IN4   4
+#define IN3   4
+#define IN4   2
 #define ENB   16
 
 // ===== MOTOR C =====
-#define IN5   17
-#define IN6   5
-#define ENC   18
+#define IN5   15
+#define IN6   13
+#define ENC   14
 
 // ===== CILINDRO =====
-#define IN7   19
-#define IN8   23
+#define IN7   23
+#define IN8   19
 
 // ================= SWITCHES =================
 #define SW1 39
@@ -285,8 +258,27 @@ int sw3=0;
 #define PWM_FREQ 5000
 #define PWM_RESOLUTION 8
 
-void disableAll() {
+struct Config {
+  int sw1;
+  int sw2;
+  int sw3;
+};
 
+Config config;
+Config configAnterior;
+
+const char* nombreEstado(EstadoRobot estado) {
+  switch (estado) {
+    case JUGAR:   return "JUGAR";
+    case CONFIG:  return "CONFIG";
+    case LINEA:   return "LINEA";
+    case EVADIR:  return "EVADIR";
+    case DETENER: return "DETENER";
+    default:      return "DESCONOCIDO";
+  }
+}
+
+void disableAll() {
   Wire.beginTransmission(MUX1);
   Wire.write(0);
   Wire.endTransmission();
@@ -297,7 +289,6 @@ void disableAll() {
 }
 
 void tcaSelect(uint8_t mux, uint8_t canal) {
-
   disableAll();
 
   Wire.beginTransmission(mux);
@@ -308,7 +299,6 @@ void tcaSelect(uint8_t mux, uint8_t canal) {
 }
 
 void seleccionarCanal(int canal) {
-
   digitalWrite(S0, canal & 0x01);
   digitalWrite(S1, (canal >> 1) & 0x01);
   digitalWrite(S2, (canal >> 2) & 0x01);
@@ -316,9 +306,7 @@ void seleccionarCanal(int canal) {
 }
 
 int leerMux(int canal) {
-
   seleccionarCanal(canal);
-
   delayMicroseconds(100);
 
   int v1 = analogRead(SIG_MUX);
@@ -328,7 +316,6 @@ int leerMux(int canal) {
 }
 
 void setup() {
-
   pinMode(SENSOR_PELOTA, INPUT);
 
   pinMode(IN1, OUTPUT);
@@ -349,6 +336,15 @@ void setup() {
   pinMode(S3, OUTPUT);
   pinMode(SIG_MUX, INPUT);
 
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  digitalWrite(IN5, LOW);
+  digitalWrite(IN6, LOW);
+  digitalWrite(IN7, LOW);
+  digitalWrite(IN8, LOW);
+
   ledcAttach(ENA, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENB, PWM_FREQ, PWM_RESOLUTION);
   ledcAttach(ENC, PWM_FREQ, PWM_RESOLUTION);
@@ -365,15 +361,10 @@ void setup() {
   pinMode(SW3, INPUT);
   delay(50);
 
-  struct Config {
-  int sw1;
-  int sw2;
-  int sw3; };
-  Config config;
-
   config.sw1 = digitalRead(SW1);
   config.sw2 = digitalRead(SW2);
   config.sw3 = digitalRead(SW3);
+  configAnterior = config;
 
   Serial.print("C,");
   Serial.print(config.sw1);
@@ -383,46 +374,49 @@ void setup() {
   Serial.println(config.sw3);
 
   Wire.begin(SDA_IMU, SCL_IMU);
-  Wire.setClock(400000);
+  Wire.setClock(100000);
 
-  if (usarBNO080) {
+if (usarBNO080) {
+  Serial.println("Iniciando BNO080...");
 
-    Serial.println("Iniciando BNO080...");
-
-    if (!bno080.begin()) {
-
-      Serial.println("BNO080 no detectado");
-
-      while (1);
-    }
-
-    bno080.enableRotationVector(50);
-
-    delay(2000);
-
-    while (!bno080.dataAvailable()) {
-
-      delay(10);
-    }
-
-    theta_offset = bno080.getYaw();
-
-    //Serial.print("Offset inicial: ");
-    //Serial.println(theta_offset * 180.0 / PI);
-
-    Serial.println("BNO080 listo");
+  if (!bno080.begin()) {
+    Serial.println("BNO080 no detectado");
+    while (1);
   }
 
-  else {
+  Serial.println("BNO080 detectado");
 
+  bno080.enableGameRotationVector(50);
+  Serial.println("Game Rotation Vector habilitado");
+
+  delay(3000);
+
+  unsigned long t0 = millis();
+  bool datosOK = false;
+
+  while (millis() - t0 < 5000) {
+    if (bno080.dataAvailable()) {
+      datosOK = true;
+      break;
+    }
+    delay(10);
+  }
+
+  if (!datosOK) {
+    Serial.println("BNO080 sin datos");
+    while (1);
+  }
+
+  theta_offset = bno080.getYaw();
+  Serial.println("BNO080 listo");
+}
+  else {
     Serial.println("Iniciando MPU6050...");
 
     mpu.initialize();
 
     if (!mpu.testConnection()) {
-
       Serial.println("Error MPU6050");
-
       while (1);
     }
 
@@ -433,9 +427,7 @@ void setup() {
     long sumZ = 0;
 
     for (int i = 0; i < 3000; i++) {
-
       int16_t gx, gy, gz;
-
       mpu.getRotation(&gx, &gy, &gz);
 
       sumX += gx;
@@ -452,118 +444,58 @@ void setup() {
 
     Serial.println("MPU6050 listo");
   }
- for(int i=0;i<NUM_SENSORES;i++) {
 
-  tcaSelect(
-    muxSensor[i],
-    canalSensor[i]
-  );
+  if (usarDistancia) {
+    for (int i = 0; i < NUM_SENSORES; i++) {
+      tcaSelect(muxSensor[i], canalSensor[i]);
 
-  if(!sensores[i].init()) {
+      if (!sensores[i].init()) {
+        Serial.print("Error sensor ");
+        Serial.println(i + 1);
+        while (1);
+      }
 
-    Serial.print("Error sensor ");
-    Serial.println(i+1);
+      sensores[i].setTimeout(500);
+      sensores[i].startContinuous();
+    }
 
-    while(1);
+    disableAll();
   }
 
-  sensores[i].setTimeout(500);
-  sensores[i].startContinuous();
-}
-
-  disableAll();
-
   if (ROBOT_ID == 'A') {
-  peerAddress = robotB_mac;
-  } 
-  else {
-  peerAddress = robotA_mac; 
+    peerAddress = robotB_mac;
+  } else {
+    peerAddress = robotA_mac;
   }
 
   lastTime = micros();
 
   Serial.println("Robot listo");
-  for(int i = 0; i < 12; i++) {
-    pisoFiltrado[i] = 0;
-}
+
+  for (int i = 0; i < 12; i++) {
+    pisoFiltrado[i] = leerMux(i);
+  }
 }
 
 void loop() {
-  ///////////////////////////////// Lectura sensor de pelota ////////
-  estadoPelota = digitalRead(SENSOR_PELOTA);
-  if (estadoPelota != estadoPelotaPrev) {
+  config.sw1 = digitalRead(SW1);
+  config.sw2 = digitalRead(SW2);
+  config.sw3 = digitalRead(SW3);
 
-    Serial.print("P,");
-    Serial.println(estadoPelota);
+  bool cambioSwitches =
+    config.sw1 != configAnterior.sw1 ||
+    config.sw2 != configAnterior.sw2 ||
+    config.sw3 != configAnterior.sw3;
 
-    estadoPelotaPrev = estadoPelota;
-  }
-  //////////////////////////////////////////////
-
-  //////////////// Lectura de sensores de distancia /////////////////
-
-for(int i=0;i<NUM_SENSORES;i++) {
-
-  tcaSelect(
-    muxSensor[i],
-    canalSensor[i]
-  );
-
-  uint16_t lectura =
-    sensores[i].readRangeContinuousMillimeters();
-
-  if(sensores[i].timeoutOccurred()) {
-
-    Serial.print("TIMEOUT S");
-    Serial.println(i + 1);
-
-    dist[i] = -1;
-  }
-  else {
-
-    dist[i] = lectura;
-  }
-}
-
-////////////////////////// Pateo /////////////////////////////////
-
-  if (patada == 1 && patada_prev == 0 && !pateando) {
-
-    digitalWrite(IN7, LOW);
-    digitalWrite(IN8, HIGH);
-
-    tiempoPatada = millis();
-
-    pateando = true;
-  }
-
-  if (pateando && millis() - tiempoPatada >= 120) {
-
-    digitalWrite(IN7, LOW);
-    digitalWrite(IN8, LOW);
-
-    pateando = false;
-
-    patada = 0;
-  }
-
-  patada_prev = patada;
-
-  //////////////////////////////////////////////////////////////////////
-
-  ////////////////////////////// Lectura de Ángulo ////////////////////
+  ////////////////////////////// Lectura de ángulo ////////////////////
   unsigned long currentTime = micros();
-
   dt = (currentTime - lastTime) / 1000000.0;
-
   lastTime = currentTime;
 
   if (dt <= 0) dt = 0.0001;
 
   if (usarBNO080) {
-
     if (bno080.dataAvailable()) {
-
       float yaw_raw = bno080.getYaw();
 
       theta_f = atan2(
@@ -573,17 +505,11 @@ for(int i=0;i<NUM_SENSORES;i++) {
 
       yaw = theta_f;
     }
-  }
-
-  else {
-
+  } else {
     int16_t ax, ay, az;
     int16_t gx, gy, gz;
 
-    mpu.getMotion6(
-      &ax, &ay, &az,
-      &gx, &gy, &gz
-    );
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
 
     gx_dps = (gx - bias_x) / 131.0;
     gy_dps = (gy - bias_y) / 131.0;
@@ -593,22 +519,13 @@ for(int i=0;i<NUM_SENSORES;i++) {
     gy_rad = gy_dps * PI / 180.0;
     gz_rad = gz_dps * PI / 180.0;
 
-    float accel_roll =
-      atan2(ay, az);
+    float accel_roll = atan2(ay, az);
+    float accel_pitch = atan2(-ax, sqrt(ay * ay + az * az));
 
-    float accel_pitch =
-      atan2(-ax, sqrt(ay * ay + az * az));
-
-    roll =
-      0.98 * (roll + gx_rad * dt) +
-      0.02 * accel_roll;
-
-    pitch =
-      0.98 * (pitch + gy_rad * dt) +
-      0.02 * accel_pitch;
+    roll = 0.98 * (roll + gx_rad * dt) + 0.02 * accel_roll;
+    pitch = 0.98 * (pitch + gy_rad * dt) + 0.02 * accel_pitch;
 
     yaw += gz_rad * dt;
-
     yaw = atan2(sin(yaw), cos(yaw));
 
     theta_f = yaw;
@@ -616,30 +533,23 @@ for(int i=0;i<NUM_SENSORES;i++) {
   /////////////////////////////////////////////////////////////////
 
   /////////////// Calculo PID //////////////////////////////////////
-
   error = setpoint - theta_f;
-
   error = atan2(sin(error), cos(error));
 
   error_int += error * dt;
-
   error_int = constrain(error_int, -2.0, 2.0);
 
   Ut_pid = Kp * error + Ki * error_int;
-
   Ut_pid = constrain(Ut_pid, -4.0, 4.0);
   ///////////////////////////////////////////////////////////////////
 
-  //////////////////////////// Lectura Valores Raspberry Pi ///////////
+  //////////////////////////// Lectura Raspberry Pi //////////////////
   if (Serial.available() > 0) {
-
     String input = Serial.readStringUntil('\n');
-
     char buffer[50];
-
     input.toCharArray(buffer, 50);
 
-    char *token = strtok(buffer, ",");
+    char* token = strtok(buffer, ",");
 
     token = strtok(NULL, ",");
     if (token) Ux = atof(token);
@@ -648,15 +558,10 @@ for(int i=0;i<NUM_SENSORES;i++) {
     if (token) Uy = atof(token);
 
     token = strtok(NULL, ",");
-
     if (token) {
-
       float valor_t = atof(token);
-
       Ut = valor_t;
-
       setpoint = valor_t;
-
       setpoint = atan2(sin(setpoint), cos(setpoint));
     }
 
@@ -667,15 +572,11 @@ for(int i=0;i<NUM_SENSORES;i++) {
     if (token) cilindro = atoi(token);
 
     token = strtok(NULL, ",");
-
     if (token) {
-
       char modo_nuevo = token[0];
 
       if (modo_nuevo != modo) {
-
         error_int = 0.0;
-
         modo = modo_nuevo;
       }
     }
@@ -684,98 +585,190 @@ for(int i=0;i<NUM_SENSORES;i++) {
     Uy = constrain(Uy, -1.0, 1.0);
     Ut = constrain(Ut, -1.0, 1.0);
   }
+
   Ux_cmd = Ux;
   Uy_cmd = Uy;
-  //////////////////////////////////////////////////////////////////
 
-  if (!pateando) {
+  ////////////////////////////// Lectura de distancia //////////////////
+  if (usarDistancia) {
+    for (int i = 0; i < NUM_SENSORES; i++) {
+      tcaSelect(muxSensor[i], canalSensor[i]);
 
-    if (cilindro == 1) {
+      uint16_t lectura = sensores[i].readRangeContinuousMillimeters();
 
-      digitalWrite(IN7, LOW);
-      digitalWrite(IN8, HIGH);
-
-    } else {
-
-      digitalWrite(IN7, LOW);
-      digitalWrite(IN8, LOW);
+      if (sensores[i].timeoutOccurred()) {
+        dist[i] = -1;
+      } else {
+        dist[i] = lectura;
+      }
     }
   }
-/////////////////////////////////////////////////////////////////////
 
-  ///////////////////////////// Leer Sensores de Piso ////////////
-  for(int i=0;i<12;i++) {
-
-      int lectura = leerMux(i);
-
-      if(pisoFiltrado[i] == 0) {
-          pisoFiltrado[i] = lectura;
-      }
-      else {
-          pisoFiltrado[i] =
-              ALPHA_PISO * lectura +
-              (1.0 - ALPHA_PISO) * pisoFiltrado[i];
-      }
-
-      piso[i] = (int)pisoFiltrado[i];
+  ////////////////////////////// Lectura de piso ///////////////////////
+  for (int i = 0; i < 12; i++) {
+    int lectura = leerMux(i);
+    pisoFiltrado[i] = ALPHA_PISO * lectura + (1.0 - ALPHA_PISO) * pisoFiltrado[i];
+    piso[i] = (int)pisoFiltrado[i];
+    linea[i] = piso[i] < umbral[i];
   }
 
-  for (int i=0;i<12;i++){
-      linea[i] = piso[i] > umbral[i];
-   }
+  parLinea[0] = linea[0] || linea[1];
+  parLinea[1] = linea[2] || linea[3];
+  parLinea[2] = linea[4] || linea[5];
+  parLinea[3] = linea[6] || linea[7];
+  parLinea[4] = linea[8] || linea[9];
+  parLinea[5] = linea[10] || linea[11];
 
-  for (int i=0;i<12;i++) {
-    if (piso[i] > umbral_parada) {
-        Ux_cmd = 0;
-        Uy_cmd = 0;
-        Ut_pid = 0;
+  /////////////////////////// Decisión de estado ///////////////////////
+  bool hayLinea = false;
+  bool hayObstaculo = false;
+
+  if (usarPiso) {
+    for (int i = 0; i < 6; i++) {
+      if (parLinea[i]) {
+        hayLinea = true;
+        break;
+      }
+    }
+  }
+
+  if (usarDistancia) {
+    for (int i = 0; i < NUM_SENSORES; i++) {
+      if (dist[i] > 0 && dist[i] < distanciaSegura[i]) {
+        hayObstaculo = true;
+        break;
+      }
+    }
+  }
+
+  estadoPelota = digitalRead(SENSOR_PELOTA);
+  if (estadoPelota != estadoPelotaPrev) {
+    Serial.print("P,");
+    Serial.println(estadoPelota);
+    estadoPelotaPrev = estadoPelota;
+  }
+
+  if (cambioSwitches) {
+    estadoActual = CONFIG;
+  }
+  else if (hayLinea) {
+    estadoActual = LINEA;
+  }
+  else if (hayObstaculo) {
+    estadoActual = DETENER;
+  }
+  else {
+    estadoActual = JUGAR;
+  }
+
+  bool cambioEstado = (estadoActual != estadoAnterior);
+  if (cambioEstado) {
+    estadoAnterior = estadoActual;
+  }
+
+  ////////////////////////////// Debug /////////////////////////////////
+  if (millis() - lastDebug >= 100) {
+    lastDebug = millis();
+    //debugRobot();
+    //imprimirDistancias();
+    imprimirPiso();
+  }
+
+  ////////////////////////// Máquina de estados ////////////////////////
+  switch (estadoActual) {
+
+    case JUGAR:
+      
+      if (patada == 1 && patada_prev == 0 && !pateando) {
+        digitalWrite(IN7, LOW);
+        digitalWrite(IN8, HIGH);
+        tiempoPatada = millis();
+        pateando = true;
+      }
+
+      if (pateando && millis() - tiempoPatada >= 120) {
+        digitalWrite(IN7, LOW);
+        digitalWrite(IN8, LOW);
+        pateando = false;
+        patada = 0;
+      }
+
+      patada_prev = patada;
+
+      if (usarDistancia && serPortero && dist[5] > 0) {
+        float errorDist = DISTANCIA_PORTERO - dist[5];
+
+        if (abs(errorDist) > 20) {
+          float correccion = errorDist * 0.009;
+          correccion = constrain(correccion, -0.6, 0.6);
+          Ux_cmd += correccion;
+        }
+      }
+      break;
+
+    case EVADIR:
+      Ux_cmd = 0;
+      Uy_cmd = 0;
+      Ut = 0;
+      Ut_pid = 0;
+      break;
+
+    case DETENER:
+      Ux_cmd = 0;
+      Uy_cmd = 0;
+      Ut = 0;
+      Ut_pid = 0;
+      break;
+
+    case LINEA:
+      Ux_cmd = 0;
+      Uy_cmd = 0;
+
+      for (int i = 0; i < 12; i++) {
+        if (piso[i] > umbral_parada) {
+          estadoActual = DETENER;
+          Ux_cmd = 0;
+          Uy_cmd = 0;
+          Ut = 0;
+          Ut_pid = 0;
+          break;
+        }
+
+        if (linea[i]) {
+          Ux_cmd += pisoX[i];
+          Uy_cmd += pisoY[i];
+        }
+      }
+
+      Ux_cmd = constrain(Ux_cmd, -1.0, 1.0);
+      Uy_cmd = constrain(Uy_cmd, -1.0, 1.0);
+      break;
+
+    case CONFIG:
+      if (cambioEstado) {
+        sw1 = digitalRead(SW1);
+        sw2 = digitalRead(SW2);
+        sw3 = digitalRead(SW3);
+
+        serPortero = sw1;
+        porteriaAzul = sw2;
+
         stopMotorA();
         stopMotorB();
         stopMotorC();
-        return; 
+
+        configAnterior = config;
       }
-    if (linea[i]){
-      Ux_cmd+=pisoX[i];
-      Uy_cmd+=pisoY[i];
-    }
-    }
 
-////////// PORTERO//////////////////////////////////
-if (serPortero && dist[5] > 0) {
-
-    float errorDist = DISTANCIA_PORTERO - dist[5];
-
-    if (abs(errorDist) > 20) {   // tolerancia de 20 mm
-
-        float correccion = errorDist * 0.009;
-
-        correccion = constrain(correccion, -0.6, 0.6);
-
-        Ux_cmd += correccion;
-    }
-}
-/*
-//////////////////////////// Evasión de Obstaculos /////////////////
-if (!serPortero) {
-  for(int i=0;i<NUM_SENSORES;i++) {
-
-      if(dist[i] > 0 &&
-        dist[i] < distanciaSegura[i]) {
-
-        Ux_cmd += repelX[i] * FUERZA_EVASION;
-        Uy_cmd += repelY[i] * FUERZA_EVASION;
-      }
+      Ux_cmd = 0;
+      Uy_cmd = 0;
+      Ut = 0;
+      Ut_pid = 0;
+      break;
   }
-}
 
-Ux_cmd = constrain(Ux_cmd,-1,1);
-Uy_cmd = constrain(Uy_cmd,-1,1);
-
-*/
-////////////// Cinématica Global y Local /////////////////////////////
-
+  ///////////////////////////// Cinématica /////////////////////////////
   if (modo == 'G') {
-
     v1 = (sin(theta_f) * Ux_cmd)
        - (cos(theta_f) * Uy_cmd)
        + (L * Ut_pid);
@@ -788,9 +781,7 @@ Uy_cmd = constrain(Uy_cmd,-1,1);
        + (cos(theta_f + PI / 3) * Uy_cmd)
        + (L * Ut_pid);
   }
-
   else if (modo == 'L') {
-
     v1 = (-Uy_cmd + Ut);
 
     v2 = ((0.866 * Ux_cmd)
@@ -802,9 +793,7 @@ Uy_cmd = constrain(Uy_cmd,-1,1);
        + Ut);
   }
 
-/////////////////////////////////////////////////////////////////////
-
-//////////////////////////// Asignación de velocidades /////////////////
+  //////////////////////// Asignación de velocidades //////////////////
   wa = v1 / R;
   wb = v2 / R;
   wc = v3 / R;
@@ -816,7 +805,6 @@ Uy_cmd = constrain(Uy_cmd,-1,1);
   pwm_a = mapPWM_linear(va, kv_A);
   pwm_b = mapPWM_linear(vb, kv_B);
   pwm_c = mapPWM_linear(vc, kv_C);
-  //pwm_a=0;pwm_b=0;pwm_c=0;
 
   (wa > 0) ? motorA_forward(pwm_a) :
   (wa < 0) ? motorA_backward(pwm_a) :
@@ -829,138 +817,103 @@ Uy_cmd = constrain(Uy_cmd,-1,1);
   (wc > 0) ? motorC_forward(pwm_c) :
   (wc < 0) ? motorC_backward(pwm_c) :
              stopMotorC();
-
-
-///////////////////////////////// Debug ////////////////
-  if (millis() - lastDebug >= 100) {
-
-    lastDebug = millis();
-
-    debugRobot();
-    //imprimirDistancias();
-    imprimirPiso();
-  }
-///////////////////////////////////////////////////
 }
 
 void stopMotorA() {
-
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, LOW);
   ledcWrite(ENA, 0);
 }
 
 void motorA_forward(int PWM) {
-
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
-
   ledcWrite(ENA, PWM);
 }
 
 void motorA_backward(int PWM) {
-
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
-
   ledcWrite(ENA, PWM);
 }
 
 void stopMotorB() {
-
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
-
   ledcWrite(ENB, 0);
 }
 
 void motorB_forward(int PWM) {
-
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
-
   ledcWrite(ENB, PWM);
 }
 
 void motorB_backward(int PWM) {
-
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, HIGH);
-
   ledcWrite(ENB, PWM);
 }
 
 void stopMotorC() {
-
   digitalWrite(IN5, LOW);
   digitalWrite(IN6, LOW);
-
   ledcWrite(ENC, 0);
 }
 
 void motorC_forward(int PWM) {
-
   digitalWrite(IN5, HIGH);
   digitalWrite(IN6, LOW);
-
   ledcWrite(ENC, PWM);
 }
 
 void motorC_backward(int PWM) {
-
   digitalWrite(IN5, LOW);
   digitalWrite(IN6, HIGH);
-
   ledcWrite(ENC, PWM);
 }
 
 int mapPWM_linear(float v, float kv) {
-
   float pwm = kv * v;
-
   pwm = constrain(pwm, -255, 255);
-
-  return abs(pwm);
+  return abs((int)pwm);
 }
 
 void debugRobot() {
-  Serial.print("Yaw: ");Serial.print(yaw, 2);
-  Serial.print(" | Ux: ");Serial.print(Ux_cmd, 2);
-  Serial.print(" | Uy: ");Serial.print(Uy_cmd, 2);
-  Serial.print(" | Ut: ");Serial.print(Ut, 2);
-  Serial.print(" | PWM_A: ");Serial.print(pwm_a);
-  Serial.print(" | PWM_B: ");Serial.print(pwm_b);
-  Serial.print(" | PWM_C: ");Serial.print(pwm_c);
-  Serial.print(" | SW1: "); Serial.print(sw1);
-  Serial.print(" | SW2: "); Serial.print(sw2);
-  Serial.print(" | SW3: "); Serial.println(sw3);
+  Serial.print("Estado: ");
+  Serial.print(nombreEstado(estadoActual));
+  Serial.print(" | Yaw: "); Serial.print(yaw, 2);
+  Serial.print(" | Ux: "); Serial.print(Ux_cmd, 2);
+  Serial.print(" | Uy: "); Serial.print(Uy_cmd, 2);
+  Serial.print(" | Ut: "); Serial.print(Ut, 2);
+  Serial.print(" | PWM_A: "); Serial.print(pwm_a);
+  Serial.print(" | PWM_B: "); Serial.print(pwm_b);
+  Serial.print(" | PWM_C: "); Serial.print(pwm_c);
+  Serial.print(" | SW1: "); Serial.print(config.sw1);
+  Serial.print(" | SW2: "); Serial.print(config.sw2);
+  Serial.print(" | SW3: "); Serial.println(config.sw3);
 }
 
 void imprimirDistancias() {
-
-  for(int i = 0; i < NUM_SENSORES; i++) {
-
+  for (int i = 0; i < NUM_SENSORES; i++) {
     Serial.print("S");
     Serial.print(i + 1);
     Serial.print(": ");
     Serial.print(dist[i]);
     Serial.print(" ");
 
-    if(i < NUM_SENSORES - 1)
-      Serial.print("| ");
+    if (i < NUM_SENSORES - 1) Serial.print("| ");
   }
-
   Serial.println();
 }
 
 void imprimirPiso() {
-
-    for(int i = 0; i < 12; i++) {
-        Serial.print("L");
-        Serial.print(i);
-        Serial.print(":");
-        Serial.print(piso[i]);
-        Serial.print(" ");
-    }
-    Serial.println();
+  for (int i = 0; i < 12; i++) {
+    Serial.print("L");
+    Serial.print(i);
+    Serial.print(":");
+    Serial.print(piso[i]);
+    Serial.print(" ");
+  }
+  Serial.println();
 }
