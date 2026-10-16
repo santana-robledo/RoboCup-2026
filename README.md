@@ -131,7 +131,7 @@ RoboCup-2026/
 
 ## Autor y proyecto
 
-**Josué Santana Robledo Corona**
+**Santana Robledo**
 
 Repositorio del proyecto: [RoboCup-2026](https://github.com/santana-robledo/RoboCup-2026)
 
